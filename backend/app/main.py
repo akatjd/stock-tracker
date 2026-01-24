@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
 from app.services.stock_data import stock_service
-from app.models.stock import StockRSI, OversoldScanResponse
+from app.models.stock import StockRSI, OversoldScanResponse, MarketType, MarketCapType, SectorType
 
 # 로깅 설정
 logging.basicConfig(
@@ -63,20 +63,36 @@ async def health_check():
 
 @app.get("/api/v1/scan/oversold", response_model=OversoldScanResponse)
 async def scan_oversold_stocks(
-    market: Literal["us", "kr", "all"] = Query("all", description="스캔할 시장 (us, kr, all)"),
+    market: MarketType = Query("all", description="스캔할 시장 (all, us, kr, kospi, kosdaq, nasdaq, dow)"),
     rsi_threshold: float = Query(30, description="RSI 기준값 (이하인 종목 필터링)"),
-    limit: int = Query(500, description="시장당 최대 스캔 종목 수")
+    limit: int = Query(500, description="시장당 최대 스캔 종목 수"),
+    market_cap: MarketCapType = Query("all", description="시가총액 필터 (all, large, mid, small)"),
+    sector: SectorType = Query("all", description="섹터 필터")
 ):
     """
     RSI 과매도 종목 스캔
 
-    - **market**: us (미국), kr (한국), all (전체)
+    - **market**:
+        - all: 전체 시장
+        - us: 미국 전체 (NASDAQ + DOW)
+        - kr: 한국 전체 (KOSPI + KOSDAQ)
+        - kospi: 한국 KOSPI
+        - kosdaq: 한국 KOSDAQ
+        - nasdaq: 미국 NASDAQ
+        - dow: 미국 다우존스 30
     - **rsi_threshold**: RSI 기준값 (기본 30)
     - **limit**: 시장당 최대 스캔 종목 수 (기본 500)
+    - **market_cap**: 시가총액 필터
+        - all: 전체
+        - large: 대형주 (KR 10조+, US $10B+)
+        - mid: 중형주 (KR 1조~10조, US $2B~$10B)
+        - small: 소형주 (KR 1조 미만, US $2B 미만)
+    - **sector**: 섹터 필터
+        - all, technology, finance, healthcare, consumer, industrial, energy, utilities, materials, realestate, communication
 
     주의: 전체 시장 스캔 시 시간이 오래 걸릴 수 있습니다.
     """
-    logger.info(f"Starting oversold scan: market={market}, threshold={rsi_threshold}, limit={limit}")
+    logger.info(f"Starting oversold scan: market={market}, threshold={rsi_threshold}, limit={limit}, market_cap={market_cap}, sector={sector}")
 
     # 동기 함수를 비동기로 실행
     loop = asyncio.get_event_loop()
@@ -86,7 +102,9 @@ async def scan_oversold_stocks(
             lambda: stock_service.scan_oversold_stocks(
                 market=market,
                 rsi_threshold=rsi_threshold,
-                limit=limit
+                limit=limit,
+                market_cap_filter=market_cap,
+                sector_filter=sector
             )
         )
 

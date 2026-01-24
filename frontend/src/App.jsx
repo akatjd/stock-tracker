@@ -9,6 +9,8 @@ function App() {
   const [rsiThreshold, setRsiThreshold] = useState(30)
   const [limit, setLimit] = useState(500)
   const [scanInfo, setScanInfo] = useState(null)
+  const [marketCap, setMarketCap] = useState('all')
+  const [sector, setSector] = useState('all')
 
   const scanOversold = async () => {
     setIsLoading(true)
@@ -17,7 +19,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/scan/oversold?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}`
+        `http://localhost:8000/api/v1/scan/oversold?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}&market_cap=${marketCap}&sector=${sector}`
       )
 
       if (!response.ok) {
@@ -42,8 +44,37 @@ function App() {
     switch (m) {
       case 'US': return '미국'
       case 'KR': return '한국'
+      case 'KOSPI': return 'KOSPI'
+      case 'KOSDAQ': return 'KOSDAQ'
+      case 'NASDAQ': return 'NASDAQ'
+      case 'DOW': return 'DOW'
       default: return m
     }
+  }
+
+  const getSectorLabel = (sector) => {
+    const labels = {
+      technology: '기술',
+      finance: '금융',
+      healthcare: '헬스케어',
+      consumer: '소비재',
+      industrial: '산업재',
+      energy: '에너지',
+      utilities: '유틸리티',
+      materials: '소재',
+      realestate: '부동산',
+      communication: '통신'
+    }
+    return labels[sector] || '-'
+  }
+
+  const getMarketCapLabel = (cap) => {
+    const labels = {
+      large: '대형',
+      mid: '중형',
+      small: '소형'
+    }
+    return labels[cap] || '-'
   }
 
   const getRsiColor = (rsi) => {
@@ -64,9 +95,17 @@ function App() {
           <div className="control-group">
             <label>시장 선택</label>
             <select value={market} onChange={(e) => setMarket(e.target.value)}>
-              <option value="all">전체 (한국 + 미국)</option>
-              <option value="kr">한국 (KOSPI + KOSDAQ)</option>
-              <option value="us">미국 (NYSE + NASDAQ)</option>
+              <option value="all">전체</option>
+              <optgroup label="한국">
+                <option value="kr">한국 전체 (KOSPI + KOSDAQ)</option>
+                <option value="kospi">KOSPI</option>
+                <option value="kosdaq">KOSDAQ</option>
+              </optgroup>
+              <optgroup label="미국">
+                <option value="us">미국 전체 (NASDAQ + DOW)</option>
+                <option value="nasdaq">NASDAQ</option>
+                <option value="dow">DOW (다우존스 30)</option>
+              </optgroup>
             </select>
           </div>
 
@@ -91,6 +130,33 @@ function App() {
               max="2000"
               step="100"
             />
+          </div>
+
+          <div className="control-group">
+            <label>시가총액</label>
+            <select value={marketCap} onChange={(e) => setMarketCap(e.target.value)}>
+              <option value="all">전체</option>
+              <option value="large">대형주</option>
+              <option value="mid">중형주</option>
+              <option value="small">소형주</option>
+            </select>
+          </div>
+
+          <div className="control-group">
+            <label>섹터</label>
+            <select value={sector} onChange={(e) => setSector(e.target.value)}>
+              <option value="all">전체</option>
+              <option value="technology">기술</option>
+              <option value="finance">금융</option>
+              <option value="healthcare">헬스케어</option>
+              <option value="consumer">소비재</option>
+              <option value="industrial">산업재</option>
+              <option value="energy">에너지</option>
+              <option value="utilities">유틸리티</option>
+              <option value="materials">소재</option>
+              <option value="realestate">부동산</option>
+              <option value="communication">통신</option>
+            </select>
           </div>
 
           <button
@@ -132,6 +198,8 @@ function App() {
                   <th>시장</th>
                   <th>종목코드</th>
                   <th>종목명</th>
+                  <th>섹터</th>
+                  <th>시총</th>
                   <th>현재가</th>
                   <th>등락률</th>
                   <th>RSI (14)</th>
@@ -147,8 +215,10 @@ function App() {
                     </td>
                     <td className="symbol">{stock.symbol}</td>
                     <td className="name">{stock.name}</td>
+                    <td className="sector">{getSectorLabel(stock.sector)}</td>
+                    <td className="market-cap-cell">{getMarketCapLabel(stock.market_cap_label)}</td>
                     <td className="price">
-                      {stock.market === 'KR'
+                      {['KOSPI', 'KOSDAQ'].includes(stock.market)
                         ? `₩${stock.price.toLocaleString()}`
                         : `$${stock.price.toFixed(2)}`
                       }

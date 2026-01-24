@@ -7,8 +7,46 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.services.rsi_calculator import calculate_rsi
+from app.models.stock import SECTOR_MAPPING
 
 logger = logging.getLogger(__name__)
+
+
+def get_market_cap_label(market_cap: float, is_korean: bool = False) -> str:
+    """시가총액을 기준으로 대형/중형/소형주 라벨 반환"""
+    if market_cap is None:
+        return "unknown"
+
+    if is_korean:
+        # 한국: 10조 이상 대형, 1조~10조 중형, 1조 미만 소형
+        if market_cap >= 10_000_000_000_000:  # 10조
+            return "large"
+        elif market_cap >= 1_000_000_000_000:  # 1조
+            return "mid"
+        else:
+            return "small"
+    else:
+        # 미국: $10B 이상 대형, $2B~$10B 중형, $2B 미만 소형
+        if market_cap >= 10_000_000_000:  # $10B
+            return "large"
+        elif market_cap >= 2_000_000_000:  # $2B
+            return "mid"
+        else:
+            return "small"
+
+
+def normalize_sector(sector: str) -> Optional[str]:
+    """섹터명을 정규화"""
+    if not sector:
+        return None
+    return SECTOR_MAPPING.get(sector, None)
+
+# 다우존스 30 종목 리스트
+DOW_30_SYMBOLS = [
+    "AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW",
+    "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM",
+    "MRK", "MSFT", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WBA", "WMT"
+]
 
 
 class StockDataService:
@@ -17,6 +55,10 @@ class StockDataService:
     def __init__(self):
         self._us_symbols_cache: Optional[List[str]] = None
         self._kr_symbols_cache: Optional[Dict[str, str]] = None
+        self._kospi_cache: Optional[Dict[str, str]] = None
+        self._kosdaq_cache: Optional[Dict[str, str]] = None
+        self._nasdaq_cache: Optional[List[str]] = None
+        self._nyse_cache: Optional[List[str]] = None
         self._cache_time: Optional[datetime] = None
         self._cache_duration = timedelta(hours=24)
 
@@ -49,6 +91,31 @@ class StockDataService:
             logger.error(f"Failed to get US symbols: {e}")
             return []
 
+    def get_nasdaq_symbols(self) -> List[str]:
+        """NASDAQ 주식 심볼 가져오기"""
+        if self._nasdaq_cache and self._cache_time:
+            if datetime.now() - self._cache_time < self._cache_duration:
+                return self._nasdaq_cache
+
+        try:
+            nasdaq = fdr.StockListing('NASDAQ')
+            nasdaq_symbols = nasdaq['Symbol'].tolist() if 'Symbol' in nasdaq.columns else []
+            nasdaq_symbols = [s for s in nasdaq_symbols if isinstance(s, str) and s.isalpha() and len(s) <= 5]
+
+            self._nasdaq_cache = nasdaq_symbols
+            self._cache_time = datetime.now()
+
+            logger.info(f"Loaded {len(nasdaq_symbols)} NASDAQ symbols")
+            return nasdaq_symbols
+
+        except Exception as e:
+            logger.error(f"Failed to get NASDAQ symbols: {e}")
+            return []
+
+    def get_dow_symbols(self) -> List[str]:
+        """다우존스 30 심볼 가져오기"""
+        return DOW_30_SYMBOLS.copy()
+
     def get_kr_symbols(self) -> Dict[str, str]:
         """한국 전체 주식 심볼 가져오기 (KOSPI + KOSDAQ) - {코드: 종목명}"""
         if self._kr_symbols_cache and self._cache_time:
@@ -77,7 +144,93 @@ class StockDataService:
             logger.error(f"Failed to get KR symbols: {e}")
             return {}
 
-    def get_us_stock_rsi(self, symbol: str, period: int = 14) -> Optional[Dict]:
+    def get_kospi_symbols_detailed(self) -> List[Dict]:
+        """KOSPI 주식 상세 정보 가져오기 - [{code, name, sector, market_cap}, ...]"""
+        try:
+            kospi = fdr.StockListing('KOSPI')
+            result = []
+            for _, row in kospi.iterrows():
+                code = row.get('Code', '')
+                name = row.get('Name', '')
+                sector = row.get('Sector', row.get('Industry', ''))
+                market_cap = row.get('Marcap', row.get('MarketCap', None))
+                if code and name:
+                    result.append({
+                        'code': code,
+                        'name': name,
+                        'sector': sector,
+                        'market_cap': market_cap
+                    })
+            logger.info(f"Loaded {len(result)} KOSPI symbols with details")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get KOSPI symbols: {e}")
+            return []
+
+    def get_kospi_symbols(self) -> Dict[str, str]:
+        """KOSPI 주식 심볼 가져오기 - {코드: 종목명}"""
+        if self._kospi_cache and self._cache_time:
+            if datetime.now() - self._cache_time < self._cache_duration:
+                return self._kospi_cache
+
+        try:
+            kospi = fdr.StockListing('KOSPI')
+            kospi_dict = dict(zip(kospi['Code'], kospi['Name'])) if 'Code' in kospi.columns else {}
+
+            self._kospi_cache = kospi_dict
+            self._cache_time = datetime.now()
+
+            logger.info(f"Loaded {len(kospi_dict)} KOSPI symbols")
+            return kospi_dict
+
+        except Exception as e:
+            logger.error(f"Failed to get KOSPI symbols: {e}")
+            return {}
+
+    def get_kosdaq_symbols_detailed(self) -> List[Dict]:
+        """KOSDAQ 주식 상세 정보 가져오기 - [{code, name, sector, market_cap}, ...]"""
+        try:
+            kosdaq = fdr.StockListing('KOSDAQ')
+            result = []
+            for _, row in kosdaq.iterrows():
+                code = row.get('Code', '')
+                name = row.get('Name', '')
+                sector = row.get('Sector', row.get('Industry', ''))
+                market_cap = row.get('Marcap', row.get('MarketCap', None))
+                if code and name:
+                    result.append({
+                        'code': code,
+                        'name': name,
+                        'sector': sector,
+                        'market_cap': market_cap
+                    })
+            logger.info(f"Loaded {len(result)} KOSDAQ symbols with details")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get KOSDAQ symbols: {e}")
+            return []
+
+    def get_kosdaq_symbols(self) -> Dict[str, str]:
+        """KOSDAQ 주식 심볼 가져오기 - {코드: 종목명}"""
+        if self._kosdaq_cache and self._cache_time:
+            if datetime.now() - self._cache_time < self._cache_duration:
+                return self._kosdaq_cache
+
+        try:
+            kosdaq = fdr.StockListing('KOSDAQ')
+            kosdaq_dict = dict(zip(kosdaq['Code'], kosdaq['Name'])) if 'Code' in kosdaq.columns else {}
+
+            self._kosdaq_cache = kosdaq_dict
+            self._cache_time = datetime.now()
+
+            logger.info(f"Loaded {len(kosdaq_dict)} KOSDAQ symbols")
+            return kosdaq_dict
+
+        except Exception as e:
+            logger.error(f"Failed to get KOSDAQ symbols: {e}")
+            return {}
+
+    def get_us_stock_rsi(self, symbol: str, period: int = 14, market_label: str = "US") -> Optional[Dict]:
         """미국 주식 RSI 조회"""
         try:
             ticker = yf.Ticker(symbol)
@@ -93,20 +246,27 @@ class StockDataService:
                 return None
 
             info = ticker.info
+            market_cap = info.get('marketCap')
+            sector = info.get('sector')
+
             return {
                 "symbol": symbol,
                 "name": info.get('shortName', symbol),
-                "market": "US",
+                "market": market_label,
                 "price": round(hist['Close'].iloc[-1], 2),
                 "rsi": rsi,
-                "change_percent": round(((hist['Close'].iloc[-1] / hist['Close'].iloc[-2]) - 1) * 100, 2) if len(hist) > 1 else 0
+                "change_percent": round(((hist['Close'].iloc[-1] / hist['Close'].iloc[-2]) - 1) * 100, 2) if len(hist) > 1 else 0,
+                "sector": normalize_sector(sector),
+                "market_cap": market_cap,
+                "market_cap_label": get_market_cap_label(market_cap, is_korean=False)
             }
 
         except Exception as e:
             logger.debug(f"Failed to get RSI for {symbol}: {e}")
             return None
 
-    def get_kr_stock_rsi(self, code: str, name: str, period: int = 14) -> Optional[Dict]:
+    def get_kr_stock_rsi(self, code: str, name: str, period: int = 14, market_label: str = "KR",
+                         sector: str = None, market_cap: float = None) -> Optional[Dict]:
         """한국 주식 RSI 조회"""
         try:
             end_date = datetime.now()
@@ -125,62 +285,128 @@ class StockDataService:
             return {
                 "symbol": code,
                 "name": name,
-                "market": "KR",
+                "market": market_label,
                 "price": int(df['Close'].iloc[-1]),
                 "rsi": rsi,
-                "change_percent": round(((df['Close'].iloc[-1] / df['Close'].iloc[-2]) - 1) * 100, 2) if len(df) > 1 else 0
+                "change_percent": round(((df['Close'].iloc[-1] / df['Close'].iloc[-2]) - 1) * 100, 2) if len(df) > 1 else 0,
+                "sector": normalize_sector(sector) if sector else None,
+                "market_cap": market_cap,
+                "market_cap_label": get_market_cap_label(market_cap, is_korean=True) if market_cap else "unknown"
             }
 
         except Exception as e:
             logger.debug(f"Failed to get RSI for {code}: {e}")
             return None
 
+    def _filter_result(self, result: Dict, rsi_threshold: float,
+                        market_cap_filter: str, sector_filter: str) -> bool:
+        """결과 필터링"""
+        if not result:
+            return False
+
+        # RSI 필터
+        if result['rsi'] > rsi_threshold:
+            return False
+
+        # 시가총액 필터
+        if market_cap_filter != "all":
+            if result.get('market_cap_label') != market_cap_filter:
+                return False
+
+        # 섹터 필터
+        if sector_filter != "all":
+            if result.get('sector') != sector_filter:
+                return False
+
+        return True
+
     def scan_oversold_stocks(
         self,
         market: str = "all",
         rsi_threshold: float = 30,
         max_workers: int = 10,
-        limit: int = 100
+        limit: int = 100,
+        market_cap_filter: str = "all",
+        sector_filter: str = "all"
     ) -> List[Dict]:
         """
         RSI 과매도 종목 스캔
 
         Args:
-            market: "us", "kr", or "all"
+            market: "all", "us", "kr", "kospi", "kosdaq", "nasdaq", "dow"
             rsi_threshold: RSI 기준값 (이하인 종목 필터링)
             max_workers: 병렬 처리 스레드 수
             limit: 각 시장당 최대 스캔 종목 수 (전체 스캔 시 시간 제한)
+            market_cap_filter: "all", "large", "mid", "small"
+            sector_filter: "all", "technology", "finance", etc.
 
         Returns:
             과매도 종목 리스트
         """
         results = []
 
-        # 미국 주식 스캔
-        if market in ["us", "all"]:
-            us_symbols = self.get_us_symbols()[:limit]
-            logger.info(f"Scanning {len(us_symbols)} US stocks...")
+        # NASDAQ 스캔
+        if market in ["nasdaq", "us", "all"]:
+            nasdaq_symbols = self.get_nasdaq_symbols()[:limit]
+            logger.info(f"Scanning {len(nasdaq_symbols)} NASDAQ stocks...")
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(self.get_us_stock_rsi, symbol): symbol for symbol in us_symbols}
+                futures = {executor.submit(self.get_us_stock_rsi, symbol, 14, "NASDAQ"): symbol for symbol in nasdaq_symbols}
 
                 for future in as_completed(futures):
                     result = future.result()
-                    if result and result['rsi'] <= rsi_threshold:
+                    if self._filter_result(result, rsi_threshold, market_cap_filter, sector_filter):
                         results.append(result)
 
-        # 한국 주식 스캔
-        if market in ["kr", "all"]:
-            kr_symbols = self.get_kr_symbols()
-            kr_items = list(kr_symbols.items())[:limit]
-            logger.info(f"Scanning {len(kr_items)} KR stocks...")
+        # DOW 30 스캔
+        if market in ["dow", "us", "all"]:
+            dow_symbols = self.get_dow_symbols()
+            logger.info(f"Scanning {len(dow_symbols)} DOW stocks...")
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(self.get_kr_stock_rsi, code, name): code for code, name in kr_items}
+                futures = {executor.submit(self.get_us_stock_rsi, symbol, 14, "DOW"): symbol for symbol in dow_symbols}
 
                 for future in as_completed(futures):
                     result = future.result()
-                    if result and result['rsi'] <= rsi_threshold:
+                    if self._filter_result(result, rsi_threshold, market_cap_filter, sector_filter):
+                        results.append(result)
+
+        # KOSPI 스캔
+        if market in ["kospi", "kr", "all"]:
+            kospi_stocks = self.get_kospi_symbols_detailed()[:limit]
+            logger.info(f"Scanning {len(kospi_stocks)} KOSPI stocks...")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self.get_kr_stock_rsi,
+                        stock['code'], stock['name'], 14, "KOSPI",
+                        stock.get('sector'), stock.get('market_cap')
+                    ): stock['code'] for stock in kospi_stocks
+                }
+
+                for future in as_completed(futures):
+                    result = future.result()
+                    if self._filter_result(result, rsi_threshold, market_cap_filter, sector_filter):
+                        results.append(result)
+
+        # KOSDAQ 스캔
+        if market in ["kosdaq", "kr", "all"]:
+            kosdaq_stocks = self.get_kosdaq_symbols_detailed()[:limit]
+            logger.info(f"Scanning {len(kosdaq_stocks)} KOSDAQ stocks...")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self.get_kr_stock_rsi,
+                        stock['code'], stock['name'], 14, "KOSDAQ",
+                        stock.get('sector'), stock.get('market_cap')
+                    ): stock['code'] for stock in kosdaq_stocks
+                }
+
+                for future in as_completed(futures):
+                    result = future.result()
+                    if self._filter_result(result, rsi_threshold, market_cap_filter, sector_filter):
                         results.append(result)
 
         # RSI 오름차순 정렬 (가장 과매도인 종목 먼저)

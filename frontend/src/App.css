@@ -77,6 +77,17 @@ body {
   min-width: 180px;
 }
 
+.control-group select option,
+.control-group select optgroup {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+.control-group select optgroup {
+  font-weight: 600;
+  color: #a0a0a0;
+}
+
 .control-group select:focus,
 .control-group input:focus {
   outline: none;
@@ -208,6 +219,26 @@ tr:hover {
   color: #3b82f6;
 }
 
+.market-badge.kospi {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.market-badge.kosdaq {
+  background: rgba(249, 115, 22, 0.2);
+  color: #f97316;
+}
+
+.market-badge.nasdaq {
+  background: rgba(59, 130, 246, 0.2);
+  color: #3b82f6;
+}
+
+.market-badge.dow {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
 .symbol {
   font-weight: 600;
   color: #fff;
@@ -219,6 +250,16 @@ tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sector {
+  color: #a0a0a0;
+  font-size: 0.875rem;
+}
+
+.market-cap-cell {
+  color: #a0a0a0;
+  font-size: 0.875rem;
 }
 
 .price {
