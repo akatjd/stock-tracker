@@ -299,13 +299,14 @@ class StockDataService:
             return None
 
     def _filter_result(self, result: Dict, rsi_threshold: float,
-                        market_cap_filter: str, sector_filter: str) -> bool:
+                        market_cap_filter: str, sector_filter: str,
+                        apply_rsi_filter: bool = True) -> bool:
         """결과 필터링"""
         if not result:
             return False
 
-        # RSI 필터
-        if result['rsi'] > rsi_threshold:
+        # RSI 필터 (옵션)
+        if apply_rsi_filter and result['rsi'] > rsi_threshold:
             return False
 
         # 시가총액 필터
@@ -413,6 +414,97 @@ class StockDataService:
         results.sort(key=lambda x: x['rsi'])
 
         logger.info(f"Found {len(results)} oversold stocks")
+        return results
+
+    def scan_oversold_stocks_with_progress(
+        self,
+        market: str = "all",
+        rsi_threshold: float = 30,
+        max_workers: int = 10,
+        limit: int = 100,
+        market_cap_filter: str = "all",
+        sector_filter: str = "all",
+        progress_callback=None,
+        result_callback=None
+    ) -> List[Dict]:
+        """
+        RSI 과매도 종목 스캔 (진행 상황 콜백 지원)
+        """
+        results = []
+        all_stocks = []
+
+        # 스캔할 종목 목록 수집
+        if market in ["nasdaq", "us", "all"]:
+            nasdaq_symbols = self.get_nasdaq_symbols()[:limit]
+            all_stocks.extend([{"symbol": s, "market": "NASDAQ", "type": "us"} for s in nasdaq_symbols])
+
+        if market in ["dow", "us", "all"]:
+            dow_symbols = self.get_dow_symbols()
+            all_stocks.extend([{"symbol": s, "market": "DOW", "type": "us"} for s in dow_symbols])
+
+        if market in ["kospi", "kr", "all"]:
+            kospi_stocks = self.get_kospi_symbols_detailed()[:limit]
+            all_stocks.extend([{
+                "symbol": s['code'],
+                "name": s['name'],
+                "market": "KOSPI",
+                "type": "kr",
+                "sector": s.get('sector'),
+                "market_cap": s.get('market_cap')
+            } for s in kospi_stocks])
+
+        if market in ["kosdaq", "kr", "all"]:
+            kosdaq_stocks = self.get_kosdaq_symbols_detailed()[:limit]
+            all_stocks.extend([{
+                "symbol": s['code'],
+                "name": s['name'],
+                "market": "KOSDAQ",
+                "type": "kr",
+                "sector": s.get('sector'),
+                "market_cap": s.get('market_cap')
+            } for s in kosdaq_stocks])
+
+        total = len(all_stocks)
+        logger.info(f"Total stocks to scan: {total}")
+
+        # 순차적으로 스캔하면서 진행 상황 보고
+        found_count = 0
+        for idx, stock in enumerate(all_stocks, 1):
+            symbol = stock["symbol"]
+            market_name = stock["market"]
+
+            # 진행 상황 콜백
+            if progress_callback:
+                progress_callback(idx, total, symbol, market_name, found_count)
+
+            # RSI 조회
+            if stock["type"] == "us":
+                result = self.get_us_stock_rsi(symbol, 14, market_name)
+            else:
+                result = self.get_kr_stock_rsi(
+                    symbol,
+                    stock.get("name", symbol),
+                    14,
+                    market_name,
+                    stock.get("sector"),
+                    stock.get("market_cap")
+                )
+
+            # 필터링 및 결과 추가 (시총/섹터 필터만 적용, RSI는 프론트에서 처리)
+            if self._filter_result(result, rsi_threshold, market_cap_filter, sector_filter, apply_rsi_filter=False):
+                # RSI 기준 이하인 경우 과매도 표시
+                result['is_oversold'] = result['rsi'] <= rsi_threshold
+                results.append(result)
+
+                # 과매도 종목 발견 시 콜백
+                if result['is_oversold']:
+                    found_count += 1
+                    if result_callback:
+                        result_callback(result)
+
+        # RSI 오름차순 정렬
+        results.sort(key=lambda x: x['rsi'])
+        logger.info(f"Scanned {len(results)} stocks, {found_count} oversold")
         return results
 
 

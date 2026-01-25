@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import logging
 from typing import Literal, Optional
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
@@ -113,6 +115,104 @@ async def scan_oversold_stocks(
         total_count=len(results),
         market=market,
         rsi_threshold=rsi_threshold
+    )
+
+
+@app.get("/api/v1/scan/oversold/stream")
+async def scan_oversold_stocks_stream(
+    market: MarketType = Query("all", description="스캔할 시장"),
+    rsi_threshold: float = Query(30, description="RSI 기준값"),
+    limit: int = Query(500, description="시장당 최대 스캔 종목 수"),
+    market_cap: MarketCapType = Query("all", description="시가총액 필터"),
+    sector: SectorType = Query("all", description="섹터 필터")
+):
+    """
+    RSI 과매도 종목 스캔 (실시간 스트리밍)
+
+    Server-Sent Events를 통해 스캔 진행 상황을 실시간으로 전송합니다.
+    """
+    async def generate():
+        loop = asyncio.get_event_loop()
+
+        # 진행 상황을 저장할 큐
+        progress_queue = asyncio.Queue()
+
+        def progress_callback(current, total, symbol, market_name, found_count):
+            """진행 상황 콜백"""
+            asyncio.run_coroutine_threadsafe(
+                progress_queue.put({
+                    "type": "progress",
+                    "current": current,
+                    "total": total,
+                    "symbol": symbol,
+                    "market": market_name,
+                    "found": found_count,
+                    "percent": round((current / total) * 100, 1) if total > 0 else 0
+                }),
+                loop
+            )
+
+        def result_callback(result):
+            """결과 발견 콜백"""
+            asyncio.run_coroutine_threadsafe(
+                progress_queue.put({
+                    "type": "found",
+                    "stock": result
+                }),
+                loop
+            )
+
+        # 백그라운드에서 스캔 실행
+        async def run_scan():
+            with ThreadPoolExecutor() as executor:
+                results = await loop.run_in_executor(
+                    executor,
+                    lambda: stock_service.scan_oversold_stocks_with_progress(
+                        market=market,
+                        rsi_threshold=rsi_threshold,
+                        limit=limit,
+                        market_cap_filter=market_cap,
+                        sector_filter=sector,
+                        progress_callback=progress_callback,
+                        result_callback=result_callback
+                    )
+                )
+                await progress_queue.put({
+                    "type": "complete",
+                    "results": results,
+                    "total_count": len(results)
+                })
+
+        # 스캔 태스크 시작
+        scan_task = asyncio.create_task(run_scan())
+
+        try:
+            while True:
+                try:
+                    # 큐에서 진행 상황 가져오기
+                    data = await asyncio.wait_for(progress_queue.get(), timeout=0.5)
+                    yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                    if data.get("type") == "complete":
+                        break
+                except asyncio.TimeoutError:
+                    # 연결 유지를 위한 heartbeat
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        finally:
+            if not scan_task.done():
+                scan_task.cancel()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 

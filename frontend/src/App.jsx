@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import './App.css'
 
 function App() {
@@ -12,32 +12,91 @@ function App() {
   const [marketCap, setMarketCap] = useState('all')
   const [sector, setSector] = useState('all')
 
-  const scanOversold = async () => {
+  // 실시간 진행 상황 상태
+  const [progress, setProgress] = useState({ current: 0, total: 0, percent: 0 })
+  const [currentStock, setCurrentStock] = useState({ symbol: '', market: '' })
+  const [foundCount, setFoundCount] = useState(0)
+  const eventSourceRef = useRef(null)
+  const [showOnlyOversold, setShowOnlyOversold] = useState(false)
+
+  const scanOversold = () => {
     setIsLoading(true)
     setError(null)
     setStocks([])
+    setProgress({ current: 0, total: 0, percent: 0 })
+    setCurrentStock({ symbol: '', market: '' })
+    setFoundCount(0)
+    setScanInfo(null)
 
-    try {
-      const response = await fetch(
-        `http://localhost:8000/api/v1/scan/oversold?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}&market_cap=${marketCap}&sector=${sector}`
-      )
-
-      if (!response.ok) {
-        throw new Error('스캔 실패')
-      }
-
-      const data = await response.json()
-      setStocks(data.stocks)
-      setScanInfo({
-        total: data.total_count,
-        market: data.market,
-        threshold: data.rsi_threshold
-      })
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setIsLoading(false)
+    // 기존 연결 정리
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
     }
+
+    const url = `http://localhost:8000/api/v1/scan/oversold/stream?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}&market_cap=${marketCap}&sector=${sector}`
+    const eventSource = new EventSource(url)
+    eventSourceRef.current = eventSource
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+
+      switch (data.type) {
+        case 'progress':
+          setProgress({
+            current: data.current,
+            total: data.total,
+            percent: data.percent
+          })
+          setCurrentStock({
+            symbol: data.symbol,
+            market: data.market
+          })
+          setFoundCount(data.found)
+          break
+
+        case 'found':
+          // 실시간으로 발견된 종목 추가
+          setStocks(prev => [...prev, data.stock].sort((a, b) => a.rsi - b.rsi))
+          break
+
+        case 'complete':
+          setStocks(data.results)
+          const oversoldCount = data.results.filter(s => s.is_oversold).length
+          setScanInfo({
+            total: data.total_count,
+            oversold: oversoldCount,
+            market: market,
+            threshold: rsiThreshold
+          })
+          setIsLoading(false)
+          eventSource.close()
+          break
+
+        case 'error':
+          setError(data.message)
+          setIsLoading(false)
+          eventSource.close()
+          break
+
+        case 'heartbeat':
+          // 연결 유지용, 무시
+          break
+      }
+    }
+
+    eventSource.onerror = () => {
+      setError('스캔 연결이 끊어졌습니다')
+      setIsLoading(false)
+      eventSource.close()
+    }
+  }
+
+  const cancelScan = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    setIsLoading(false)
   }
 
   const getMarketLabel = (m) => {
@@ -160,19 +219,63 @@ function App() {
           </div>
 
           <button
-            className="scan-button"
-            onClick={scanOversold}
-            disabled={isLoading}
+            className={`scan-button ${isLoading ? 'scanning' : ''}`}
+            onClick={isLoading ? cancelScan : scanOversold}
           >
-            {isLoading ? '스캔 중...' : '스캔 시작'}
+            {isLoading ? '스캔 중지' : '스캔 시작'}
           </button>
         </div>
 
         {isLoading && (
           <div className="loading">
-            <div className="spinner"></div>
-            <p>주식 데이터를 분석 중입니다...</p>
-            <p className="loading-hint">전체 시장 스캔 시 수 분이 소요될 수 있습니다</p>
+            <div className="progress-container">
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+              <div className="progress-text">
+                {progress.current} / {progress.total} ({progress.percent}%)
+              </div>
+            </div>
+
+            <div className="current-stock">
+              <span className="scanning-label">스캔 중:</span>
+              <span className={`market-badge ${currentStock.market.toLowerCase()}`}>
+                {currentStock.market}
+              </span>
+              <span className="stock-symbol">{currentStock.symbol}</span>
+            </div>
+
+            <div className="found-count">
+              발견된 과매도 종목: <strong>{foundCount}</strong>개
+            </div>
+
+            {stocks.length > 0 && (
+              <div className="found-stocks-preview">
+                <h4>실시간 발견 종목</h4>
+                <div className="found-list">
+                  {stocks.slice(0, 10).map((stock, idx) => (
+                    <div key={`${stock.symbol}-${idx}`} className="found-item">
+                      <span className={`market-badge small ${stock.market.toLowerCase()}`}>
+                        {stock.market}
+                      </span>
+                      <span className="found-symbol">{stock.symbol}</span>
+                      <span className="found-name">{stock.name}</span>
+                      <span className="found-rsi" style={{ backgroundColor: getRsiColor(stock.rsi) }}>
+                        RSI {stock.rsi.toFixed(1)}
+                      </span>
+                    </div>
+                  ))}
+                  {stocks.length > 10 && (
+                    <div className="more-count">+{stocks.length - 10}개 더...</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <p className="loading-hint">스캔을 중지하려면 '스캔 중지' 버튼을 클릭하세요</p>
           </div>
         )}
 
@@ -183,15 +286,37 @@ function App() {
         )}
 
         {scanInfo && !isLoading && (
-          <div className="scan-info">
-            <p>
-              <strong>{scanInfo.total}개</strong> 종목이 RSI {scanInfo.threshold} 이하입니다
-            </p>
+          <div className="scan-summary">
+            <div className="summary-card oversold">
+              <div className="summary-number">{stocks.filter(s => s.is_oversold).length}</div>
+              <div className="summary-label">과매도 종목 (RSI ≤ {scanInfo.threshold})</div>
+            </div>
+            <div className="summary-card total">
+              <div className="summary-number">{stocks.length}</div>
+              <div className="summary-label">전체 스캔 종목</div>
+            </div>
           </div>
         )}
 
-        {stocks.length > 0 && (
+        {stocks.length > 0 && !isLoading && (
           <div className="results">
+            <div className="results-header">
+              <h3>스캔 결과</h3>
+              <div className="filter-toggle">
+                <button
+                  className={`toggle-btn ${!showOnlyOversold ? 'active' : ''}`}
+                  onClick={() => setShowOnlyOversold(false)}
+                >
+                  전체 ({stocks.length})
+                </button>
+                <button
+                  className={`toggle-btn ${showOnlyOversold ? 'active' : ''}`}
+                  onClick={() => setShowOnlyOversold(true)}
+                >
+                  과매도만 ({stocks.filter(s => s.is_oversold).length})
+                </button>
+              </div>
+            </div>
             <table>
               <thead>
                 <tr>
@@ -206,8 +331,8 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((stock, index) => (
-                  <tr key={`${stock.symbol}-${index}`}>
+                {(showOnlyOversold ? stocks.filter(s => s.is_oversold) : stocks).map((stock, index) => (
+                  <tr key={`${stock.symbol}-${index}`} className={stock.is_oversold ? 'oversold-row' : ''}>
                     <td>
                       <span className={`market-badge ${stock.market.toLowerCase()}`}>
                         {getMarketLabel(stock.market)}
@@ -243,7 +368,7 @@ function App() {
 
         {!isLoading && stocks.length === 0 && scanInfo && (
           <div className="no-results">
-            <p>RSI {rsiThreshold} 이하인 종목이 없습니다</p>
+            <p>스캔된 종목이 없습니다</p>
           </div>
         )}
       </main>
