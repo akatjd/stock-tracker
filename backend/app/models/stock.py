@@ -21,6 +21,13 @@ MarketCapType = Literal[
     "small"          # 소형주: KR 1조 미만, US $2B 미만
 ]
 
+# 봉 타입 (일봉, 주봉, 월봉)
+PeriodType = Literal[
+    "day",           # 일봉
+    "week",          # 주봉
+    "month"          # 월봉
+]
+
 # 섹터 타입
 SectorType = Literal[
     "all",           # 전체

@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.config import settings
 from app.services.stock_data import stock_service
-from app.models.stock import StockRSI, OversoldScanResponse, MarketType, MarketCapType, SectorType
+from app.models.stock import StockRSI, OversoldScanResponse, MarketType, MarketCapType, SectorType, PeriodType
 
 # 로깅 설정
 logging.basicConfig(
@@ -124,21 +124,51 @@ async def scan_oversold_stocks_stream(
     rsi_threshold: float = Query(30, description="RSI 기준값"),
     limit: int = Query(500, description="시장당 최대 스캔 종목 수"),
     market_cap: MarketCapType = Query("all", description="시가총액 필터"),
-    sector: SectorType = Query("all", description="섹터 필터")
+    sector: SectorType = Query("all", description="섹터 필터"),
+    period: PeriodType = Query("day", description="봉 타입 (day: 일봉, week: 주봉, month: 월봉)"),
+    custom_stocks: Optional[str] = Query(None, description="커스텀 종목 리스트 (JSON)")
 ):
     """
     RSI 과매도 종목 스캔 (실시간 스트리밍)
 
     Server-Sent Events를 통해 스캔 진행 상황을 실시간으로 전송합니다.
+
+    - **period**: 봉 타입
+        - day: 일봉 (기본값)
+        - week: 주봉
+        - month: 월봉
+    - **custom_stocks**: 추가로 스캔할 커스텀 종목 (JSON 형식)
     """
+    # 커스텀 종목 파싱
+    parsed_custom_stocks = []
+    if custom_stocks:
+        try:
+            parsed_custom_stocks = json.loads(custom_stocks)
+            logger.info(f"Custom stocks to scan: {len(parsed_custom_stocks)}")
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse custom_stocks JSON")
     async def generate():
+        logger.info(f"SSE stream started for market={market}")
         loop = asyncio.get_event_loop()
 
         # 진행 상황을 저장할 큐
         progress_queue = asyncio.Queue()
 
+        # 취소 플래그
+        import threading
+        cancelled = threading.Event()
+
+        def cancel_check():
+            return cancelled.is_set()
+
+        # 연결 시작 이벤트 즉시 전송
+        logger.info("Sending connected event")
+        yield f"data: {json.dumps({'type': 'connected', 'message': 'Scan started'})}\n\n"
+
         def progress_callback(current, total, symbol, market_name, found_count):
             """진행 상황 콜백"""
+            if current <= 3:  # 처음 3개만 로그
+                logger.info(f"Progress: {current}/{total} - {symbol} ({market_name})")
             asyncio.run_coroutine_threadsafe(
                 progress_queue.put({
                     "type": "progress",
@@ -162,6 +192,17 @@ async def scan_oversold_stocks_stream(
                 loop
             )
 
+        def start_callback(total):
+            """스캔 시작 콜백"""
+            logger.info(f"Start callback: total={total}")
+            asyncio.run_coroutine_threadsafe(
+                progress_queue.put({
+                    "type": "start",
+                    "total": total
+                }),
+                loop
+            )
+
         # 백그라운드에서 스캔 실행
         async def run_scan():
             with ThreadPoolExecutor() as executor:
@@ -173,8 +214,12 @@ async def scan_oversold_stocks_stream(
                         limit=limit,
                         market_cap_filter=market_cap,
                         sector_filter=sector,
+                        candle_period=period,
                         progress_callback=progress_callback,
-                        result_callback=result_callback
+                        result_callback=result_callback,
+                        start_callback=start_callback,
+                        cancel_check=cancel_check,
+                        custom_stocks=parsed_custom_stocks
                     )
                 )
                 await progress_queue.put({
@@ -198,12 +243,25 @@ async def scan_oversold_stocks_stream(
                 except asyncio.TimeoutError:
                     # 연결 유지를 위한 heartbeat
                     yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+        except asyncio.CancelledError:
+            logger.info("SSE stream cancelled by client")
+            cancelled.set()
+        except GeneratorExit:
+            logger.info("Client disconnected (GeneratorExit)")
+            cancelled.set()
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
         finally:
+            # 스캔 취소 신호 전송
+            cancelled.set()
             if not scan_task.done():
                 scan_task.cancel()
+                try:
+                    await asyncio.wait_for(scan_task, timeout=1.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass
+            logger.info("SSE stream closed")
 
     return StreamingResponse(
         generate(),
@@ -214,6 +272,100 @@ async def scan_oversold_stocks_stream(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@app.get("/api/v1/scan/preview")
+async def preview_scan_stocks(
+    market: MarketType = Query("all", description="스캔할 시장"),
+    limit: int = Query(500, description="시장당 최대 스캔 종목 수"),
+    market_cap: MarketCapType = Query("all", description="시가총액 필터"),
+    sector: SectorType = Query("all", description="섹터 필터"),
+    page: int = Query(1, description="페이지 번호", ge=1),
+    page_size: int = Query(50, description="페이지당 항목 수", ge=10, le=100),
+    search: Optional[str] = Query(None, description="종목코드 또는 종목명 검색")
+):
+    """
+    스캔 대상 종목 미리보기 (페이징 및 검색 지원)
+
+    실제 RSI를 계산하지 않고 스캔 대상이 될 종목 목록만 반환합니다.
+    """
+    loop = asyncio.get_event_loop()
+
+    def get_preview_stocks():
+        all_stocks = []
+
+        # NASDAQ
+        if market in ["nasdaq", "us", "all"]:
+            nasdaq_symbols = stock_service.get_nasdaq_symbols()[:limit]
+            all_stocks.extend([{"symbol": s, "name": s, "market": "NASDAQ"} for s in nasdaq_symbols])
+
+        # DOW
+        if market in ["dow", "us", "all"]:
+            dow_symbols = stock_service.get_dow_symbols()
+            all_stocks.extend([{"symbol": s, "name": s, "market": "DOW"} for s in dow_symbols])
+
+        # KOSPI
+        if market in ["kospi", "kr", "all"]:
+            kospi_stocks = stock_service.get_kospi_symbols_detailed()[:limit]
+            all_stocks.extend([{
+                "symbol": s['code'],
+                "name": s['name'],
+                "market": "KOSPI",
+                "sector": s.get('sector'),
+                "market_cap": s.get('market_cap')
+            } for s in kospi_stocks])
+
+        # KOSDAQ
+        if market in ["kosdaq", "kr", "all"]:
+            kosdaq_stocks = stock_service.get_kosdaq_symbols_detailed()[:limit]
+            all_stocks.extend([{
+                "symbol": s['code'],
+                "name": s['name'],
+                "market": "KOSDAQ",
+                "sector": s.get('sector'),
+                "market_cap": s.get('market_cap')
+            } for s in kosdaq_stocks])
+
+        return all_stocks
+
+    with ThreadPoolExecutor() as executor:
+        stocks = await loop.run_in_executor(executor, get_preview_stocks)
+
+    # 시장별 개수 계산 (검색 전 전체 기준)
+    market_counts = {}
+    for stock in stocks:
+        m = stock['market']
+        market_counts[m] = market_counts.get(m, 0) + 1
+
+    total_count = len(stocks)
+
+    # 검색 필터 적용
+    if search:
+        search_lower = search.lower()
+        stocks = [
+            s for s in stocks
+            if search_lower in s['symbol'].lower() or search_lower in s['name'].lower()
+        ]
+
+    filtered_count = len(stocks)
+
+    # 페이징 적용
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paged_stocks = stocks[start_idx:end_idx]
+    total_pages = (filtered_count + page_size - 1) // page_size
+
+    return {
+        "total_count": total_count,
+        "filtered_count": filtered_count,
+        "market_counts": market_counts,
+        "stocks": paged_stocks,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_prev": page > 1,
+        "has_next": page < total_pages
+    }
 
 
 @app.get("/api/v1/symbols/us")

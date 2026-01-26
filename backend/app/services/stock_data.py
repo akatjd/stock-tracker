@@ -12,6 +12,35 @@ from app.models.stock import SECTOR_MAPPING
 logger = logging.getLogger(__name__)
 
 
+def resample_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """
+    일봉 데이터를 주봉 또는 월봉으로 변환
+
+    Args:
+        df: OHLC 데이터프레임 (Close 컬럼 필수)
+        period: 'day', 'week', 'month'
+
+    Returns:
+        리샘플링된 데이터프레임
+    """
+    if period == 'day':
+        return df
+
+    # 리샘플링 규칙
+    rule = 'W' if period == 'week' else 'ME'  # ME = Month End
+
+    # OHLC 리샘플링
+    resampled = df.resample(rule).agg({
+        'Open': 'first',
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last',
+        'Volume': 'sum'
+    }).dropna()
+
+    return resampled
+
+
 def get_market_cap_label(market_cap: float, is_korean: bool = False) -> str:
     """시가총액을 기준으로 대형/중형/소형주 라벨 반환"""
     if market_cap is None:
@@ -230,17 +259,38 @@ class StockDataService:
             logger.error(f"Failed to get KOSDAQ symbols: {e}")
             return {}
 
-    def get_us_stock_rsi(self, symbol: str, period: int = 14, market_label: str = "US") -> Optional[Dict]:
-        """미국 주식 RSI 조회"""
+    def get_us_stock_rsi(self, symbol: str, rsi_period: int = 14, market_label: str = "US",
+                          candle_period: str = "day") -> Optional[Dict]:
+        """
+        미국 주식 RSI 조회
+
+        Args:
+            symbol: 주식 심볼
+            rsi_period: RSI 계산 기간 (기본 14)
+            market_label: 시장 라벨
+            candle_period: 봉 타입 (day, week, month)
+        """
         try:
             ticker = yf.Ticker(symbol)
-            # 최근 50일 데이터 (RSI 계산에 충분한 양)
-            hist = ticker.history(period="3mo")
+            # 주봉/월봉의 경우 더 긴 기간 필요
+            if candle_period == 'month':
+                hist = ticker.history(period="2y")
+            elif candle_period == 'week':
+                hist = ticker.history(period="1y")
+            else:
+                hist = ticker.history(period="3mo")
 
-            if hist.empty or len(hist) < period + 1:
+            if hist.empty:
                 return None
 
-            rsi = calculate_rsi(hist['Close'], period)
+            # 주봉/월봉 리샘플링
+            if candle_period in ['week', 'month']:
+                hist = resample_to_period(hist, candle_period)
+
+            if len(hist) < rsi_period + 1:
+                return None
+
+            rsi = calculate_rsi(hist['Close'], rsi_period)
 
             if rsi is None:
                 return None
@@ -265,19 +315,44 @@ class StockDataService:
             logger.debug(f"Failed to get RSI for {symbol}: {e}")
             return None
 
-    def get_kr_stock_rsi(self, code: str, name: str, period: int = 14, market_label: str = "KR",
-                         sector: str = None, market_cap: float = None) -> Optional[Dict]:
-        """한국 주식 RSI 조회"""
+    def get_kr_stock_rsi(self, code: str, name: str, rsi_period: int = 14, market_label: str = "KR",
+                         sector: str = None, market_cap: float = None,
+                         candle_period: str = "day") -> Optional[Dict]:
+        """
+        한국 주식 RSI 조회
+
+        Args:
+            code: 주식 코드
+            name: 종목명
+            rsi_period: RSI 계산 기간 (기본 14)
+            market_label: 시장 라벨
+            sector: 섹터
+            market_cap: 시가총액
+            candle_period: 봉 타입 (day, week, month)
+        """
         try:
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=100)
+            # 주봉/월봉의 경우 더 긴 기간 필요
+            if candle_period == 'month':
+                start_date = end_date - timedelta(days=730)  # 2년
+            elif candle_period == 'week':
+                start_date = end_date - timedelta(days=365)  # 1년
+            else:
+                start_date = end_date - timedelta(days=100)
 
             df = fdr.DataReader(code, start_date, end_date)
 
-            if df.empty or len(df) < period + 1:
+            if df.empty:
                 return None
 
-            rsi = calculate_rsi(df['Close'], period)
+            # 주봉/월봉 리샘플링
+            if candle_period in ['week', 'month']:
+                df = resample_to_period(df, candle_period)
+
+            if len(df) < rsi_period + 1:
+                return None
+
+            rsi = calculate_rsi(df['Close'], rsi_period)
 
             if rsi is None:
                 return None
@@ -424,11 +499,19 @@ class StockDataService:
         limit: int = 100,
         market_cap_filter: str = "all",
         sector_filter: str = "all",
+        candle_period: str = "day",
         progress_callback=None,
-        result_callback=None
+        result_callback=None,
+        start_callback=None,
+        cancel_check=None,
+        custom_stocks: List[Dict] = None
     ) -> List[Dict]:
         """
         RSI 과매도 종목 스캔 (진행 상황 콜백 지원)
+
+        Args:
+            candle_period: 봉 타입 (day, week, month)
+            custom_stocks: 추가로 스캔할 커스텀 종목 리스트
         """
         results = []
         all_stocks = []
@@ -464,12 +547,38 @@ class StockDataService:
                 "market_cap": s.get('market_cap')
             } for s in kosdaq_stocks])
 
+        # 커스텀 종목 추가
+        if custom_stocks:
+            for cs in custom_stocks:
+                # 이미 목록에 있는지 확인
+                symbol = cs.get('symbol', '')
+                market_name = cs.get('market', '')
+                if not any(s['symbol'] == symbol and s['market'] == market_name for s in all_stocks):
+                    stock_type = 'kr' if market_name in ['KOSPI', 'KOSDAQ'] else 'us'
+                    all_stocks.append({
+                        "symbol": symbol,
+                        "name": cs.get('name', symbol),
+                        "market": market_name,
+                        "type": stock_type,
+                        "isCustom": True
+                    })
+            logger.info(f"Added {len(custom_stocks)} custom stocks")
+
         total = len(all_stocks)
         logger.info(f"Total stocks to scan: {total}")
+
+        # 스캔 시작 알림
+        if start_callback:
+            start_callback(total)
 
         # 순차적으로 스캔하면서 진행 상황 보고
         found_count = 0
         for idx, stock in enumerate(all_stocks, 1):
+            # 취소 확인
+            if cancel_check and cancel_check():
+                logger.info("Scan cancelled by client")
+                break
+
             symbol = stock["symbol"]
             market_name = stock["market"]
 
@@ -479,7 +588,7 @@ class StockDataService:
 
             # RSI 조회
             if stock["type"] == "us":
-                result = self.get_us_stock_rsi(symbol, 14, market_name)
+                result = self.get_us_stock_rsi(symbol, 14, market_name, candle_period)
             else:
                 result = self.get_kr_stock_rsi(
                     symbol,
@@ -487,7 +596,8 @@ class StockDataService:
                     14,
                     market_name,
                     stock.get("sector"),
-                    stock.get("market_cap")
+                    stock.get("market_cap"),
+                    candle_period
                 )
 
             # 필터링 및 결과 추가 (시총/섹터 필터만 적용, RSI는 프론트에서 처리)
