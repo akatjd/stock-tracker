@@ -1,8 +1,15 @@
 import { useState, useRef } from 'react'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
 import './App.css'
 
 function App() {
   const [stocks, setStocks] = useState([])
+
+  // 종목 상세 모달 상태
+  const [selectedStock, setSelectedStock] = useState(null)
+  const [stockDetail, setStockDetail] = useState(null)
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false)
+  const [showDetail, setShowDetail] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
   const [market, setMarket] = useState('all')
@@ -20,6 +27,10 @@ function App() {
   const eventSourceRef = useRef(null)
   const [showOnlyOversold, setShowOnlyOversold] = useState(false)
 
+  // 정렬 상태
+  const [sortColumn, setSortColumn] = useState('rsi')  // 기본 RSI 정렬
+  const [sortDirection, setSortDirection] = useState('asc')  // 'asc' | 'desc'
+
   // 미리보기 상태
   const [previewData, setPreviewData] = useState(null)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
@@ -32,6 +43,8 @@ function App() {
   const [customStocks, setCustomStocks] = useState([])
   const [addStockInput, setAddStockInput] = useState('')
   const [addStockMarket, setAddStockMarket] = useState('KOSPI')
+  const [isValidating, setIsValidating] = useState(false)
+  const [validationMessage, setValidationMessage] = useState(null)  // { type: 'error' | 'success', text: string }
 
   // 미리보기 함수
   const fetchPreview = async (page = 1, search = '') => {
@@ -81,29 +94,70 @@ function App() {
     setPreviewPage(1)
     setPreviewSearch('')
     setSearchInput('')
+    setValidationMessage(null)
   }
 
   // 커스텀 종목 추가
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     if (!addStockInput.trim()) return
 
     const symbol = addStockInput.trim().toUpperCase()
+    setValidationMessage(null)
 
-    // 이미 추가된 종목인지 확인
+    // 1. 이미 커스텀 목록에 추가된 종목인지 확인
     if (customStocks.some(s => s.symbol === symbol && s.market === addStockMarket)) {
-      alert('이미 추가된 종목입니다.')
+      setValidationMessage({ type: 'error', text: '이미 추가된 종목입니다.' })
       return
     }
 
-    const newStock = {
-      symbol: symbol,
-      name: symbol,  // 이름은 스캔 시 조회됨
-      market: addStockMarket,
-      isCustom: true
-    }
+    setIsValidating(true)
+    try {
+      // 2. 미리보기 API로 전체 목록에서 종목 검색 (해당 시장에서만)
+      const previewCheckUrl = `http://localhost:8000/api/v1/scan/preview?market=${addStockMarket.toLowerCase()}&limit=500&search=${encodeURIComponent(symbol)}&page=1&page_size=10`
+      const previewResponse = await fetch(previewCheckUrl)
+      const previewResult = await previewResponse.json()
 
-    setCustomStocks(prev => [...prev, newStock])
-    setAddStockInput('')
+      // 정확히 같은 종목코드가 있는지 확인
+      const existsInPreview = previewResult.stocks.some(
+        s => s.symbol === symbol && s.market === addStockMarket
+      )
+      if (existsInPreview) {
+        setValidationMessage({ type: 'error', text: '이미 스캔 목록에 포함된 종목입니다.' })
+        setIsValidating(false)
+        return
+      }
+
+      // 3. 백엔드 API로 종목 존재 여부 검증
+      const response = await fetch(
+        `http://localhost:8000/api/v1/stock/validate?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(addStockMarket)}`
+      )
+      const result = await response.json()
+
+      if (!result.valid) {
+        setValidationMessage({ type: 'error', text: result.message })
+        return
+      }
+
+      // 검증 성공: 종목 추가
+      const newStock = {
+        symbol: result.symbol,
+        name: result.name,
+        market: addStockMarket,
+        isCustom: true
+      }
+
+      setCustomStocks(prev => [...prev, newStock])
+      setAddStockInput('')
+      setValidationMessage({ type: 'success', text: `${result.name} (${result.symbol}) 추가됨` })
+
+      // 성공 메시지 3초 후 제거
+      setTimeout(() => setValidationMessage(null), 3000)
+
+    } catch (err) {
+      setValidationMessage({ type: 'error', text: '종목 검증 중 오류가 발생했습니다.' })
+    } finally {
+      setIsValidating(false)
+    }
   }
 
   // 커스텀 종목 삭제
@@ -114,6 +168,59 @@ function App() {
   // 커스텀 종목 전체 삭제
   const handleClearCustomStocks = () => {
     setCustomStocks([])
+  }
+
+  // 종목 상세 정보 조회
+  const fetchStockDetail = async (stock) => {
+    setSelectedStock(stock)
+    setIsLoadingDetail(true)
+    setShowDetail(true)
+    setStockDetail(null)
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(stock.symbol)}?market=${encodeURIComponent(stock.market)}`
+      )
+      const data = await response.json()
+
+      if (data.error) {
+        setStockDetail({ error: data.error })
+      } else {
+        setStockDetail(data)
+      }
+    } catch (err) {
+      setStockDetail({ error: '상세 정보를 불러오는데 실패했습니다.' })
+    } finally {
+      setIsLoadingDetail(false)
+    }
+  }
+
+  // 상세 모달 닫기
+  const closeDetail = () => {
+    setShowDetail(false)
+    setSelectedStock(null)
+    setStockDetail(null)
+  }
+
+  // 숫자 포맷팅 (억/조 단위)
+  const formatNumber = (num, isKorean = false) => {
+    if (!num) return '-'
+    if (isKorean) {
+      const billions = num / 100000000
+      if (billions >= 10000) return `${(billions / 10000).toFixed(1)}조`
+      return `${Math.round(billions).toLocaleString()}억`
+    } else {
+      if (num >= 1000000000000) return `$${(num / 1000000000000).toFixed(2)}T`
+      if (num >= 1000000000) return `$${(num / 1000000000).toFixed(2)}B`
+      if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`
+      return `$${num.toLocaleString()}`
+    }
+  }
+
+  // 퍼센트 포맷팅
+  const formatPercent = (value) => {
+    if (value === null || value === undefined) return '-'
+    return `${(value * 100).toFixed(2)}%`
   }
 
   // 미리보기에서 스캔 시작
@@ -293,6 +400,82 @@ function App() {
     }
   }
 
+  // 정렬 핸들러
+  const handleSort = (column) => {
+    if (sortColumn === column) {
+      // 같은 칼럼 클릭 시 방향 전환
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      // 다른 칼럼 클릭 시 해당 칼럼으로 오름차순 정렬
+      setSortColumn(column)
+      setSortDirection('asc')
+    }
+  }
+
+  // 정렬된 주식 목록 반환
+  const getSortedStocks = () => {
+    const filtered = showOnlyOversold ? stocks.filter(s => s.is_oversold) : stocks
+
+    return [...filtered].sort((a, b) => {
+      let aVal, bVal
+
+      switch (sortColumn) {
+        case 'market':
+          aVal = a.market || ''
+          bVal = b.market || ''
+          break
+        case 'symbol':
+          aVal = a.symbol || ''
+          bVal = b.symbol || ''
+          break
+        case 'name':
+          aVal = a.name || ''
+          bVal = b.name || ''
+          break
+        case 'sector':
+          aVal = a.sector || ''
+          bVal = b.sector || ''
+          break
+        case 'market_cap':
+          aVal = a.market_cap || 0
+          bVal = b.market_cap || 0
+          break
+        case 'price':
+          aVal = a.price || 0
+          bVal = b.price || 0
+          break
+        case 'change_percent':
+          aVal = a.change_percent || 0
+          bVal = b.change_percent || 0
+          break
+        case 'rsi':
+          aVal = a.rsi || 0
+          bVal = b.rsi || 0
+          break
+        default:
+          return 0
+      }
+
+      // 문자열 비교
+      if (typeof aVal === 'string') {
+        const cmp = aVal.localeCompare(bVal, 'ko')
+        return sortDirection === 'asc' ? cmp : -cmp
+      }
+
+      // 숫자 비교
+      const cmp = aVal - bVal
+      return sortDirection === 'asc' ? cmp : -cmp
+    })
+  }
+
+  // 정렬 아이콘
+  const SortIcon = ({ column }) => {
+    if (sortColumn !== column) {
+      return <span className="sort-icon inactive">⇅</span>
+    }
+    return <span className="sort-icon active">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -453,8 +636,12 @@ function App() {
                 <div className="add-stock-form">
                   <select
                     value={addStockMarket}
-                    onChange={(e) => setAddStockMarket(e.target.value)}
+                    onChange={(e) => {
+                      setAddStockMarket(e.target.value)
+                      setValidationMessage(null)
+                    }}
                     className="market-select"
+                    disabled={isValidating}
                   >
                     <option value="KOSPI">KOSPI</option>
                     <option value="KOSDAQ">KOSDAQ</option>
@@ -465,13 +652,26 @@ function App() {
                     type="text"
                     placeholder="종목코드 입력 (예: 005930, AAPL)"
                     value={addStockInput}
-                    onChange={(e) => setAddStockInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddStock()}
+                    onChange={(e) => {
+                      setAddStockInput(e.target.value)
+                      setValidationMessage(null)
+                    }}
+                    onKeyDown={(e) => e.key === 'Enter' && !isValidating && handleAddStock()}
+                    disabled={isValidating}
                   />
-                  <button className="add-stock-button" onClick={handleAddStock}>
-                    추가
+                  <button
+                    className="add-stock-button"
+                    onClick={handleAddStock}
+                    disabled={isValidating}
+                  >
+                    {isValidating ? '검증중...' : '추가'}
                   </button>
                 </div>
+                {validationMessage && (
+                  <div className={`validation-message ${validationMessage.type}`}>
+                    {validationMessage.text}
+                  </div>
+                )}
                 {customStocks.length > 0 && (
                   <div className="custom-stocks-list">
                     {customStocks.map((stock, idx) => (
@@ -572,6 +772,277 @@ function App() {
           </div>
         )}
 
+        {/* 종목 상세 모달 */}
+        {showDetail && (
+          <div className="detail-modal">
+            <div className="detail-content">
+              <div className="detail-header">
+                <div className="detail-title">
+                  {selectedStock && (
+                    <>
+                      <span className={`market-badge ${selectedStock.market.toLowerCase()}`}>
+                        {selectedStock.market}
+                      </span>
+                      <h2>{selectedStock.name}</h2>
+                      <span className="detail-symbol">{selectedStock.symbol}</span>
+                    </>
+                  )}
+                </div>
+                <button className="close-button" onClick={closeDetail}>×</button>
+              </div>
+
+              {isLoadingDetail ? (
+                <div className="detail-loading">
+                  <div className="spinner"></div>
+                  <p>상세 정보를 불러오는 중...</p>
+                </div>
+              ) : stockDetail?.error ? (
+                <div className="detail-error">
+                  <p>{stockDetail.error}</p>
+                </div>
+              ) : stockDetail && (
+                <div className="detail-body">
+                  {/* 가격 정보 */}
+                  <div className="price-section">
+                    <div className="current-price-large">
+                      {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                        ? `₩${stockDetail.current_price?.toLocaleString()}`
+                        : `$${stockDetail.current_price?.toFixed(2)}`
+                      }
+                    </div>
+                    <div className={`price-change-large ${stockDetail.change >= 0 ? 'positive' : 'negative'}`}>
+                      {stockDetail.change >= 0 ? '+' : ''}
+                      {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                        ? `₩${stockDetail.change?.toLocaleString()}`
+                        : `$${stockDetail.change?.toFixed(2)}`
+                      }
+                      {' '}({stockDetail.change_percent >= 0 ? '+' : ''}{stockDetail.change_percent?.toFixed(2)}%)
+                    </div>
+                  </div>
+
+                  {/* 주요 지표 */}
+                  <div className="indicators-grid">
+                    <div className="indicator-card">
+                      <div className="indicator-label">RSI (14)</div>
+                      <div className="indicator-value" style={{ color: getRsiColor(stockDetail.rsi) }}>
+                        {stockDetail.rsi?.toFixed(1)}
+                      </div>
+                    </div>
+                    <div className="indicator-card">
+                      <div className="indicator-label">52주 최고</div>
+                      <div className="indicator-value">
+                        {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                          ? `₩${stockDetail.high_52w?.toLocaleString()}`
+                          : `$${stockDetail.high_52w?.toFixed(2)}`
+                        }
+                      </div>
+                    </div>
+                    <div className="indicator-card">
+                      <div className="indicator-label">52주 최저</div>
+                      <div className="indicator-value">
+                        {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                          ? `₩${stockDetail.low_52w?.toLocaleString()}`
+                          : `$${stockDetail.low_52w?.toFixed(2)}`
+                        }
+                      </div>
+                    </div>
+                    <div className="indicator-card">
+                      <div className="indicator-label">시가총액</div>
+                      <div className="indicator-value">
+                        {formatNumber(stockDetail.market_cap, ['KOSPI', 'KOSDAQ'].includes(stockDetail.market))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 이동평균 */}
+                  <div className="ma-section">
+                    <h4>이동평균</h4>
+                    <div className="ma-grid">
+                      <div className="ma-item">
+                        <span className="ma-label">MA5</span>
+                        <span className="ma-value">
+                          {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                            ? `₩${stockDetail.moving_averages?.ma5?.toLocaleString()}`
+                            : `$${stockDetail.moving_averages?.ma5?.toFixed(2)}`
+                          }
+                        </span>
+                      </div>
+                      <div className="ma-item">
+                        <span className="ma-label">MA20</span>
+                        <span className="ma-value">
+                          {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                            ? `₩${stockDetail.moving_averages?.ma20?.toLocaleString()}`
+                            : `$${stockDetail.moving_averages?.ma20?.toFixed(2)}`
+                          }
+                        </span>
+                      </div>
+                      {stockDetail.moving_averages?.ma60 && (
+                        <div className="ma-item">
+                          <span className="ma-label">MA60</span>
+                          <span className="ma-value">
+                            {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                              ? `₩${stockDetail.moving_averages?.ma60?.toLocaleString()}`
+                              : `$${stockDetail.moving_averages?.ma60?.toFixed(2)}`
+                            }
+                          </span>
+                        </div>
+                      )}
+                      {stockDetail.moving_averages?.ma120 && (
+                        <div className="ma-item">
+                          <span className="ma-label">MA120</span>
+                          <span className="ma-value">
+                            {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                              ? `₩${stockDetail.moving_averages?.ma120?.toLocaleString()}`
+                              : `$${stockDetail.moving_averages?.ma120?.toFixed(2)}`
+                            }
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 차트 */}
+                  <div className="chart-section">
+                    <h4>주가 차트 (6개월)</h4>
+                    <div className="chart-container">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={stockDetail.chart_data}>
+                          <defs>
+                            <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#667eea" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#667eea" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                          <XAxis
+                            dataKey="date"
+                            tick={{ fill: '#a0a0a0', fontSize: 11 }}
+                            tickFormatter={(value) => value.slice(5)}
+                            interval="preserveStartEnd"
+                          />
+                          <YAxis
+                            tick={{ fill: '#a0a0a0', fontSize: 11 }}
+                            domain={['auto', 'auto']}
+                            tickFormatter={(value) =>
+                              ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                                ? `${(value / 1000).toFixed(0)}K`
+                                : `$${value.toFixed(0)}`
+                            }
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              background: 'rgba(26, 26, 46, 0.95)',
+                              border: '1px solid rgba(255,255,255,0.2)',
+                              borderRadius: '8px',
+                              color: '#fff'
+                            }}
+                            formatter={(value) => [
+                              ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                                ? `₩${value.toLocaleString()}`
+                                : `$${value.toFixed(2)}`,
+                              '종가'
+                            ]}
+                            labelFormatter={(label) => label}
+                          />
+                          <Area
+                            type="monotone"
+                            dataKey="close"
+                            stroke="#667eea"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#colorPrice)"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* 재무제표 (미국 주식만) */}
+                  {stockDetail.financials?.available && (
+                    <div className="financials-section">
+                      <h4>재무 정보</h4>
+                      <div className="financials-grid">
+                        {stockDetail.financials.per && (
+                          <div className="financial-item">
+                            <span className="financial-label">PER</span>
+                            <span className="financial-value">{stockDetail.financials.per.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.pbr && (
+                          <div className="financial-item">
+                            <span className="financial-label">PBR</span>
+                            <span className="financial-value">{stockDetail.financials.pbr.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.eps && (
+                          <div className="financial-item">
+                            <span className="financial-label">EPS</span>
+                            <span className="financial-value">${stockDetail.financials.eps.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.roe && (
+                          <div className="financial-item">
+                            <span className="financial-label">ROE</span>
+                            <span className="financial-value">{formatPercent(stockDetail.financials.roe)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.profit_margin && (
+                          <div className="financial-item">
+                            <span className="financial-label">이익률</span>
+                            <span className="financial-value">{formatPercent(stockDetail.financials.profit_margin)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.dividend_yield && (
+                          <div className="financial-item">
+                            <span className="financial-label">배당수익률</span>
+                            <span className="financial-value">{formatPercent(stockDetail.financials.dividend_yield)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.debt_to_equity && (
+                          <div className="financial-item">
+                            <span className="financial-label">부채비율</span>
+                            <span className="financial-value">{stockDetail.financials.debt_to_equity.toFixed(1)}%</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.revenue && (
+                          <div className="financial-item">
+                            <span className="financial-label">매출</span>
+                            <span className="financial-value">{formatNumber(stockDetail.financials.revenue)}</span>
+                          </div>
+                        )}
+                        {stockDetail.financials.profit && (
+                          <div className="financial-item">
+                            <span className="financial-label">순이익</span>
+                            <span className="financial-value">{formatNumber(stockDetail.financials.profit)}</span>
+                          </div>
+                        )}
+                      </div>
+                      {stockDetail.financials.sector && (
+                        <div className="company-info">
+                          <p><strong>섹터:</strong> {stockDetail.financials.sector}</p>
+                          <p><strong>산업:</strong> {stockDetail.financials.industry}</p>
+                        </div>
+                      )}
+                      {stockDetail.financials.description && (
+                        <div className="company-description">
+                          <h5>기업 소개</h5>
+                          <p>{stockDetail.financials.description}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {stockDetail.financials && !stockDetail.financials.available && (
+                    <div className="financials-unavailable">
+                      <p>{stockDetail.financials.message}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {isLoading && (
           <div className="loading">
             <div className="progress-container">
@@ -666,19 +1137,39 @@ function App() {
             <table>
               <thead>
                 <tr>
-                  <th>시장</th>
-                  <th>종목코드</th>
-                  <th>종목명</th>
-                  <th>섹터</th>
-                  <th>시총</th>
-                  <th>현재가</th>
-                  <th>등락률</th>
-                  <th>RSI ({getPeriodLabel(period)})</th>
+                  <th className="sortable" onClick={() => handleSort('market')}>
+                    시장 <SortIcon column="market" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('symbol')}>
+                    종목코드 <SortIcon column="symbol" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('name')}>
+                    종목명 <SortIcon column="name" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('sector')}>
+                    섹터 <SortIcon column="sector" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('market_cap')}>
+                    시총 <SortIcon column="market_cap" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('price')}>
+                    현재가 <SortIcon column="price" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('change_percent')}>
+                    등락률 <SortIcon column="change_percent" />
+                  </th>
+                  <th className="sortable" onClick={() => handleSort('rsi')}>
+                    RSI ({getPeriodLabel(period)}) <SortIcon column="rsi" />
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {(showOnlyOversold ? stocks.filter(s => s.is_oversold) : stocks).map((stock, index) => (
-                  <tr key={`${stock.symbol}-${index}`} className={stock.is_oversold ? 'oversold-row' : ''}>
+                {getSortedStocks().map((stock, index) => (
+                  <tr
+                    key={`${stock.symbol}-${index}`}
+                    className={`clickable-row ${stock.is_oversold ? 'oversold-row' : ''}`}
+                    onClick={() => fetchStockDetail(stock)}
+                  >
                     <td>
                       <span className={`market-badge ${stock.market.toLowerCase()}`}>
                         {getMarketLabel(stock.market)}

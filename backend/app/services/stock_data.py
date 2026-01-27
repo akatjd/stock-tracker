@@ -618,5 +618,314 @@ class StockDataService:
         return results
 
 
+    def validate_stock(self, symbol: str, market: str) -> Dict:
+        """
+        종목이 실제로 존재하는지 검증
+
+        Args:
+            symbol: 종목 코드/심볼
+            market: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE, DOW)
+
+        Returns:
+            {
+                "valid": bool,
+                "symbol": str,
+                "name": str (종목명),
+                "market": str,
+                "message": str (오류 메시지)
+            }
+        """
+        try:
+            symbol = symbol.strip().upper()
+
+            if market in ['KOSPI', 'KOSDAQ']:
+                # 한국 주식: FinanceDataReader로 검증
+                if market == 'KOSPI':
+                    stocks = self.get_kospi_symbols_detailed()
+                else:
+                    stocks = self.get_kosdaq_symbols_detailed()
+
+                # 종목코드로 검색
+                for stock in stocks:
+                    if stock['code'] == symbol:
+                        return {
+                            "valid": True,
+                            "symbol": stock['code'],
+                            "name": stock['name'],
+                            "market": market,
+                            "message": "종목이 확인되었습니다."
+                        }
+
+                # 종목명으로 검색 (부분 일치)
+                for stock in stocks:
+                    if symbol in stock['name']:
+                        return {
+                            "valid": True,
+                            "symbol": stock['code'],
+                            "name": stock['name'],
+                            "market": market,
+                            "message": f"'{stock['name']}' 종목이 확인되었습니다."
+                        }
+
+                return {
+                    "valid": False,
+                    "symbol": symbol,
+                    "name": None,
+                    "market": market,
+                    "message": f"{market}에서 '{symbol}'을(를) 찾을 수 없습니다."
+                }
+
+            else:
+                # 미국 주식: yfinance로 검증
+                try:
+                    ticker = yf.Ticker(symbol)
+                    info = ticker.info
+
+                    # info가 비어있거나 유효하지 않은 경우
+                    if not info or info.get('regularMarketPrice') is None:
+                        # 히스토리 데이터로 한번 더 확인
+                        hist = ticker.history(period="5d")
+                        if hist.empty:
+                            return {
+                                "valid": False,
+                                "symbol": symbol,
+                                "name": None,
+                                "market": market,
+                                "message": f"'{symbol}' 종목을 찾을 수 없습니다."
+                            }
+
+                    name = info.get('shortName') or info.get('longName') or symbol
+
+                    return {
+                        "valid": True,
+                        "symbol": symbol,
+                        "name": name,
+                        "market": market,
+                        "message": "종목이 확인되었습니다."
+                    }
+
+                except Exception as e:
+                    logger.debug(f"Failed to validate {symbol}: {e}")
+                    return {
+                        "valid": False,
+                        "symbol": symbol,
+                        "name": None,
+                        "market": market,
+                        "message": f"'{symbol}' 종목을 찾을 수 없습니다."
+                    }
+
+        except Exception as e:
+            logger.error(f"Validation error for {symbol}: {e}")
+            return {
+                "valid": False,
+                "symbol": symbol,
+                "name": None,
+                "market": market,
+                "message": f"검증 중 오류가 발생했습니다: {str(e)}"
+            }
+
+    def get_stock_detail(self, symbol: str, market: str) -> Dict:
+        """
+        종목 상세 정보 조회 (차트 데이터 + 재무제표)
+
+        Args:
+            symbol: 종목 코드/심볼
+            market: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)
+
+        Returns:
+            상세 정보 딕셔너리
+        """
+        try:
+            symbol = symbol.strip().upper()
+            is_korean = market in ['KOSPI', 'KOSDAQ']
+
+            if is_korean:
+                return self._get_kr_stock_detail(symbol, market)
+            else:
+                return self._get_us_stock_detail(symbol, market)
+
+        except Exception as e:
+            logger.error(f"Failed to get stock detail for {symbol}: {e}")
+            return {"error": str(e)}
+
+    def _get_kr_stock_detail(self, symbol: str, market: str) -> Dict:
+        """한국 주식 상세 정보"""
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=365)  # 1년 데이터
+
+            # 가격 데이터 조회
+            df = fdr.DataReader(symbol, start_date, end_date)
+            if df.empty:
+                return {"error": "가격 데이터를 찾을 수 없습니다."}
+
+            # 종목명 조회
+            stocks = self.get_kospi_symbols_detailed() if market == 'KOSPI' else self.get_kosdaq_symbols_detailed()
+            stock_info = next((s for s in stocks if s['code'] == symbol), None)
+            name = stock_info['name'] if stock_info else symbol
+
+            # 차트 데이터 (최근 6개월)
+            chart_df = df.tail(120)  # 약 6개월 거래일
+            chart_data = []
+            for date, row in chart_df.iterrows():
+                chart_data.append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "open": int(row['Open']),
+                    "high": int(row['High']),
+                    "low": int(row['Low']),
+                    "close": int(row['Close']),
+                    "volume": int(row['Volume'])
+                })
+
+            # 기본 정보
+            current_price = int(df['Close'].iloc[-1])
+            prev_close = int(df['Close'].iloc[-2]) if len(df) > 1 else current_price
+            change = current_price - prev_close
+            change_percent = round((change / prev_close) * 100, 2) if prev_close > 0 else 0
+
+            # 52주 최고/최저
+            high_52w = int(df['High'].max())
+            low_52w = int(df['Low'].min())
+
+            # RSI 계산
+            from app.services.rsi_calculator import calculate_rsi
+            rsi = calculate_rsi(df['Close'], 14)
+
+            # 이동평균
+            ma5 = int(df['Close'].tail(5).mean())
+            ma20 = int(df['Close'].tail(20).mean())
+            ma60 = int(df['Close'].tail(60).mean()) if len(df) >= 60 else None
+            ma120 = int(df['Close'].tail(120).mean()) if len(df) >= 120 else None
+
+            # 시가총액 정보
+            market_cap = stock_info.get('market_cap') if stock_info else None
+
+            return {
+                "symbol": symbol,
+                "name": name,
+                "market": market,
+                "current_price": current_price,
+                "change": change,
+                "change_percent": change_percent,
+                "high_52w": high_52w,
+                "low_52w": low_52w,
+                "rsi": rsi,
+                "market_cap": market_cap,
+                "moving_averages": {
+                    "ma5": ma5,
+                    "ma20": ma20,
+                    "ma60": ma60,
+                    "ma120": ma120
+                },
+                "chart_data": chart_data,
+                "financials": self._get_kr_financials(symbol)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get KR stock detail: {e}")
+            return {"error": str(e)}
+
+    def _get_kr_financials(self, symbol: str) -> Dict:
+        """한국 주식 재무제표 (기본 정보만)"""
+        # FinanceDataReader는 재무제표를 직접 제공하지 않음
+        # 기본 정보만 반환
+        return {
+            "available": False,
+            "message": "한국 주식 재무제표는 현재 지원되지 않습니다."
+        }
+
+    def _get_us_stock_detail(self, symbol: str, market: str) -> Dict:
+        """미국 주식 상세 정보"""
+        try:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+
+            # 가격 데이터 (1년)
+            hist = ticker.history(period="1y")
+            if hist.empty:
+                return {"error": "가격 데이터를 찾을 수 없습니다."}
+
+            # 차트 데이터 (최근 6개월)
+            chart_df = hist.tail(120)
+            chart_data = []
+            for date, row in chart_df.iterrows():
+                chart_data.append({
+                    "date": date.strftime("%Y-%m-%d"),
+                    "open": round(row['Open'], 2),
+                    "high": round(row['High'], 2),
+                    "low": round(row['Low'], 2),
+                    "close": round(row['Close'], 2),
+                    "volume": int(row['Volume'])
+                })
+
+            # 기본 정보
+            current_price = round(hist['Close'].iloc[-1], 2)
+            prev_close = round(hist['Close'].iloc[-2], 2) if len(hist) > 1 else current_price
+            change = round(current_price - prev_close, 2)
+            change_percent = round((change / prev_close) * 100, 2) if prev_close > 0 else 0
+
+            # 52주 최고/최저
+            high_52w = round(hist['High'].max(), 2)
+            low_52w = round(hist['Low'].min(), 2)
+
+            # RSI
+            from app.services.rsi_calculator import calculate_rsi
+            rsi = calculate_rsi(hist['Close'], 14)
+
+            # 이동평균
+            ma5 = round(hist['Close'].tail(5).mean(), 2)
+            ma20 = round(hist['Close'].tail(20).mean(), 2)
+            ma60 = round(hist['Close'].tail(60).mean(), 2) if len(hist) >= 60 else None
+            ma120 = round(hist['Close'].tail(120).mean(), 2) if len(hist) >= 120 else None
+
+            return {
+                "symbol": symbol,
+                "name": info.get('shortName') or info.get('longName') or symbol,
+                "market": market,
+                "current_price": current_price,
+                "change": change,
+                "change_percent": change_percent,
+                "high_52w": high_52w,
+                "low_52w": low_52w,
+                "rsi": rsi,
+                "market_cap": info.get('marketCap'),
+                "moving_averages": {
+                    "ma5": ma5,
+                    "ma20": ma20,
+                    "ma60": ma60,
+                    "ma120": ma120
+                },
+                "chart_data": chart_data,
+                "financials": self._get_us_financials(info)
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get US stock detail: {e}")
+            return {"error": str(e)}
+
+    def _get_us_financials(self, info: Dict) -> Dict:
+        """미국 주식 재무제표 정보"""
+        try:
+            return {
+                "available": True,
+                "per": info.get('trailingPE'),  # PER
+                "pbr": info.get('priceToBook'),  # PBR
+                "eps": info.get('trailingEps'),  # EPS
+                "roe": info.get('returnOnEquity'),  # ROE (소수점)
+                "revenue": info.get('totalRevenue'),  # 매출
+                "profit": info.get('netIncomeToCommon'),  # 순이익
+                "dividend_yield": info.get('dividendYield'),  # 배당수익률
+                "debt_to_equity": info.get('debtToEquity'),  # 부채비율
+                "current_ratio": info.get('currentRatio'),  # 유동비율
+                "profit_margin": info.get('profitMargins'),  # 이익률
+                "sector": info.get('sector'),
+                "industry": info.get('industry'),
+                "description": info.get('longBusinessSummary', '')[:500]  # 기업 설명 (500자 제한)
+            }
+        except Exception as e:
+            logger.error(f"Failed to get US financials: {e}")
+            return {"available": False, "message": str(e)}
+
+
 # 싱글톤 인스턴스
 stock_service = StockDataService()

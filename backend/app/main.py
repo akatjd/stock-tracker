@@ -368,6 +368,62 @@ async def preview_scan_stocks(
     }
 
 
+@app.get("/api/v1/stock/validate")
+async def validate_stock(
+    symbol: str = Query(..., description="종목코드 또는 심볼"),
+    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE, DOW)")
+):
+    """
+    종목이 실제로 존재하는지 검증
+
+    - **symbol**: 종목코드 또는 심볼 (예: 005930, AAPL)
+    - **market**: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE, DOW)
+
+    Returns:
+        valid: 유효 여부
+        symbol: 종목코드
+        name: 종목명
+        market: 시장
+        message: 결과 메시지
+    """
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(
+            executor,
+            lambda: stock_service.validate_stock(symbol, market)
+        )
+
+    return result
+
+
+@app.get("/api/v1/stock/detail/{symbol}")
+async def get_stock_detail(
+    symbol: str,
+    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)")
+):
+    """
+    종목 상세 정보 조회 (차트 데이터 + 재무제표)
+
+    - **symbol**: 종목코드 또는 심볼
+    - **market**: 시장
+
+    Returns:
+        - 기본 정보 (가격, 등락률, 52주 최고/최저 등)
+        - 차트 데이터 (6개월)
+        - 재무제표 정보
+    """
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(
+            executor,
+            lambda: stock_service.get_stock_detail(symbol, market)
+        )
+
+    return result
+
+
 @app.get("/api/v1/symbols/us")
 async def get_us_symbols():
     """미국 주식 심볼 목록 조회"""
