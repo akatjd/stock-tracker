@@ -29,6 +29,72 @@ def translate_to_korean(text: str) -> str:
         return text  # 번역 실패 시 원문 반환
 
 
+def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: float = 2.0):
+    """볼린저 밴드 계산"""
+    sma = prices.rolling(window=window).mean()
+    std = prices.rolling(window=window).std()
+    upper = sma + (std * num_std)
+    lower = sma - (std * num_std)
+    return sma, upper, lower
+
+
+def calculate_macd(prices: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    """MACD 계산"""
+    ema_fast = prices.ewm(span=fast, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def calculate_rsi_series(prices: pd.Series, period: int = 14):
+    """RSI 시리즈 계산 (차트용)"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
+def calculate_support_resistance(df: pd.DataFrame, window: int = 20):
+    """지지선/저항선 계산 (피봇 포인트 기반)"""
+    recent = df.tail(window)
+
+    # 최근 고점/저점 기반
+    resistance_levels = []
+    support_levels = []
+
+    # 로컬 최고점/최저점 찾기
+    highs = recent['High'].values
+    lows = recent['Low'].values
+
+    for i in range(2, len(highs) - 2):
+        # 로컬 최고점
+        if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
+            resistance_levels.append(float(highs[i]))
+        # 로컬 최저점
+        if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
+            support_levels.append(float(lows[i]))
+
+    # 중복 제거 및 클러스터링 (비슷한 가격대 병합)
+    def cluster_levels(levels, threshold=0.02):
+        if not levels:
+            return []
+        levels = sorted(levels)
+        clustered = [levels[0]]
+        for level in levels[1:]:
+            if (level - clustered[-1]) / clustered[-1] > threshold:
+                clustered.append(level)
+        return clustered[-3:]  # 최근 3개만
+
+    return {
+        "resistance": cluster_levels(resistance_levels),
+        "support": cluster_levels(support_levels)
+    }
+
+
 def resample_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     """
     일봉 데이터를 주봉 또는 월봉으로 변환
@@ -781,18 +847,55 @@ class StockDataService:
             stock_info = next((s for s in stocks if s['code'] == symbol), None)
             name = stock_info['name'] if stock_info else symbol
 
-            # 차트 데이터 (최근 6개월)
-            chart_df = df.tail(120)  # 약 6개월 거래일
+            # 기술적 지표 계산
+            close_prices = df['Close']
+
+            # 볼린저 밴드
+            bb_middle, bb_upper, bb_lower = calculate_bollinger_bands(close_prices)
+
+            # MACD
+            macd_line, signal_line, macd_histogram = calculate_macd(close_prices)
+
+            # RSI 시리즈
+            rsi_series = calculate_rsi_series(close_prices)
+
+            # 이동평균 시리즈
+            ma5_series = close_prices.rolling(window=5).mean()
+            ma20_series = close_prices.rolling(window=20).mean()
+            ma60_series = close_prices.rolling(window=60).mean()
+            ma120_series = close_prices.rolling(window=120).mean()
+
+            # 지지선/저항선
+            support_resistance = calculate_support_resistance(df)
+
+            # 차트 데이터 (최근 6개월) - 기술적 지표 포함
+            chart_df = df.tail(120)
             chart_data = []
-            for date, row in chart_df.iterrows():
-                chart_data.append({
+            for idx, (date, row) in enumerate(chart_df.iterrows()):
+                data_point = {
                     "date": date.strftime("%Y-%m-%d"),
                     "open": int(row['Open']),
                     "high": int(row['High']),
                     "low": int(row['Low']),
                     "close": int(row['Close']),
-                    "volume": int(row['Volume'])
-                })
+                    "volume": int(row['Volume']),
+                    # 볼린저 밴드
+                    "bb_upper": int(bb_upper.loc[date]) if pd.notna(bb_upper.loc[date]) else None,
+                    "bb_middle": int(bb_middle.loc[date]) if pd.notna(bb_middle.loc[date]) else None,
+                    "bb_lower": int(bb_lower.loc[date]) if pd.notna(bb_lower.loc[date]) else None,
+                    # MACD
+                    "macd": round(float(macd_line.loc[date]), 2) if pd.notna(macd_line.loc[date]) else None,
+                    "macd_signal": round(float(signal_line.loc[date]), 2) if pd.notna(signal_line.loc[date]) else None,
+                    "macd_histogram": round(float(macd_histogram.loc[date]), 2) if pd.notna(macd_histogram.loc[date]) else None,
+                    # RSI
+                    "rsi": round(float(rsi_series.loc[date]), 2) if pd.notna(rsi_series.loc[date]) else None,
+                    # 이동평균
+                    "ma5": int(ma5_series.loc[date]) if pd.notna(ma5_series.loc[date]) else None,
+                    "ma20": int(ma20_series.loc[date]) if pd.notna(ma20_series.loc[date]) else None,
+                    "ma60": int(ma60_series.loc[date]) if pd.notna(ma60_series.loc[date]) else None,
+                    "ma120": int(ma120_series.loc[date]) if pd.notna(ma120_series.loc[date]) else None,
+                }
+                chart_data.append(data_point)
 
             # 기본 정보
             current_price = int(df['Close'].iloc[-1])
@@ -804,11 +907,11 @@ class StockDataService:
             high_52w = int(df['High'].max())
             low_52w = int(df['Low'].min())
 
-            # RSI 계산
+            # 현재 RSI
             from app.services.rsi_calculator import calculate_rsi
             rsi = calculate_rsi(df['Close'], 14)
 
-            # 이동평균
+            # 현재 이동평균
             ma5 = int(df['Close'].tail(5).mean())
             ma20 = int(df['Close'].tail(20).mean())
             ma60 = int(df['Close'].tail(60).mean()) if len(df) >= 60 else None
@@ -834,6 +937,7 @@ class StockDataService:
                     "ma60": ma60,
                     "ma120": ma120
                 },
+                "support_resistance": support_resistance,
                 "chart_data": chart_data,
                 "financials": self._get_kr_financials(symbol)
             }
@@ -862,18 +966,55 @@ class StockDataService:
             if hist.empty:
                 return {"error": "가격 데이터를 찾을 수 없습니다."}
 
-            # 차트 데이터 (최근 6개월)
+            # 기술적 지표 계산
+            close_prices = hist['Close']
+
+            # 볼린저 밴드
+            bb_middle, bb_upper, bb_lower = calculate_bollinger_bands(close_prices)
+
+            # MACD
+            macd_line, signal_line, macd_histogram = calculate_macd(close_prices)
+
+            # RSI 시리즈
+            rsi_series = calculate_rsi_series(close_prices)
+
+            # 이동평균 시리즈
+            ma5_series = close_prices.rolling(window=5).mean()
+            ma20_series = close_prices.rolling(window=20).mean()
+            ma60_series = close_prices.rolling(window=60).mean()
+            ma120_series = close_prices.rolling(window=120).mean()
+
+            # 지지선/저항선
+            support_resistance = calculate_support_resistance(hist)
+
+            # 차트 데이터 (최근 6개월) - 기술적 지표 포함
             chart_df = hist.tail(120)
             chart_data = []
-            for date, row in chart_df.iterrows():
-                chart_data.append({
+            for idx, (date, row) in enumerate(chart_df.iterrows()):
+                data_point = {
                     "date": date.strftime("%Y-%m-%d"),
                     "open": round(row['Open'], 2),
                     "high": round(row['High'], 2),
                     "low": round(row['Low'], 2),
                     "close": round(row['Close'], 2),
-                    "volume": int(row['Volume'])
-                })
+                    "volume": int(row['Volume']),
+                    # 볼린저 밴드
+                    "bb_upper": round(float(bb_upper.loc[date]), 2) if pd.notna(bb_upper.loc[date]) else None,
+                    "bb_middle": round(float(bb_middle.loc[date]), 2) if pd.notna(bb_middle.loc[date]) else None,
+                    "bb_lower": round(float(bb_lower.loc[date]), 2) if pd.notna(bb_lower.loc[date]) else None,
+                    # MACD
+                    "macd": round(float(macd_line.loc[date]), 2) if pd.notna(macd_line.loc[date]) else None,
+                    "macd_signal": round(float(signal_line.loc[date]), 2) if pd.notna(signal_line.loc[date]) else None,
+                    "macd_histogram": round(float(macd_histogram.loc[date]), 2) if pd.notna(macd_histogram.loc[date]) else None,
+                    # RSI
+                    "rsi": round(float(rsi_series.loc[date]), 2) if pd.notna(rsi_series.loc[date]) else None,
+                    # 이동평균
+                    "ma5": round(float(ma5_series.loc[date]), 2) if pd.notna(ma5_series.loc[date]) else None,
+                    "ma20": round(float(ma20_series.loc[date]), 2) if pd.notna(ma20_series.loc[date]) else None,
+                    "ma60": round(float(ma60_series.loc[date]), 2) if pd.notna(ma60_series.loc[date]) else None,
+                    "ma120": round(float(ma120_series.loc[date]), 2) if pd.notna(ma120_series.loc[date]) else None,
+                }
+                chart_data.append(data_point)
 
             # 기본 정보
             current_price = round(hist['Close'].iloc[-1], 2)
@@ -885,11 +1026,11 @@ class StockDataService:
             high_52w = round(hist['High'].max(), 2)
             low_52w = round(hist['Low'].min(), 2)
 
-            # RSI
+            # 현재 RSI
             from app.services.rsi_calculator import calculate_rsi
             rsi = calculate_rsi(hist['Close'], 14)
 
-            # 이동평균
+            # 현재 이동평균
             ma5 = round(hist['Close'].tail(5).mean(), 2)
             ma20 = round(hist['Close'].tail(20).mean(), 2)
             ma60 = round(hist['Close'].tail(60).mean(), 2) if len(hist) >= 60 else None
@@ -912,6 +1053,7 @@ class StockDataService:
                     "ma60": ma60,
                     "ma120": ma120
                 },
+                "support_resistance": support_resistance,
                 "chart_data": chart_data,
                 "financials": self._get_us_financials(info)
             }

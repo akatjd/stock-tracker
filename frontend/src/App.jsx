@@ -1,5 +1,8 @@
 import { useState, useRef } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Area, AreaChart, ComposedChart, Bar, ReferenceLine, Legend
+} from 'recharts'
 import './App.css'
 
 function App() {
@@ -8,6 +11,18 @@ function App() {
   // 종목 상세 모달 상태
   const [selectedStock, setSelectedStock] = useState(null)
   const [stockDetail, setStockDetail] = useState(null)
+
+  // 차트 지표 토글 상태
+  const [chartIndicators, setChartIndicators] = useState({
+    ma5: true,
+    ma20: true,
+    ma60: false,
+    ma120: false,
+    bollinger: true,
+    volume: true,
+    rsi: true,
+    macd: true
+  })
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -901,12 +916,58 @@ function App() {
                     </div>
                   </div>
 
-                  {/* 차트 */}
+                  {/* 차트 지표 토글 */}
                   <div className="chart-section">
-                    <h4>주가 차트 (6개월)</h4>
-                    <div className="chart-container">
-                      <ResponsiveContainer width="100%" height={300}>
-                        <AreaChart data={stockDetail.chart_data}>
+                    <div className="chart-header">
+                      <h4>기술적 분석 차트</h4>
+                      <div className="indicator-toggles">
+                        <label className={`toggle-btn ${chartIndicators.ma5 ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.ma5}
+                            onChange={(e) => setChartIndicators({...chartIndicators, ma5: e.target.checked})}
+                          />
+                          <span style={{color: '#ff6b6b'}}>MA5</span>
+                        </label>
+                        <label className={`toggle-btn ${chartIndicators.ma20 ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.ma20}
+                            onChange={(e) => setChartIndicators({...chartIndicators, ma20: e.target.checked})}
+                          />
+                          <span style={{color: '#ffd93d'}}>MA20</span>
+                        </label>
+                        <label className={`toggle-btn ${chartIndicators.ma60 ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.ma60}
+                            onChange={(e) => setChartIndicators({...chartIndicators, ma60: e.target.checked})}
+                          />
+                          <span style={{color: '#6bcb77'}}>MA60</span>
+                        </label>
+                        <label className={`toggle-btn ${chartIndicators.ma120 ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.ma120}
+                            onChange={(e) => setChartIndicators({...chartIndicators, ma120: e.target.checked})}
+                          />
+                          <span style={{color: '#9d4edd'}}>MA120</span>
+                        </label>
+                        <label className={`toggle-btn ${chartIndicators.bollinger ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.bollinger}
+                            onChange={(e) => setChartIndicators({...chartIndicators, bollinger: e.target.checked})}
+                          />
+                          <span style={{color: '#4ecdc4'}}>볼린저</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* 메인 가격 차트 */}
+                    <div className="chart-container main-chart">
+                      <ResponsiveContainer width="100%" height={350}>
+                        <ComposedChart data={stockDetail.chart_data}>
                           <defs>
                             <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#667eea" stopOpacity={0.3}/>
@@ -916,12 +977,12 @@ function App() {
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
                           <XAxis
                             dataKey="date"
-                            tick={{ fill: '#a0a0a0', fontSize: 11 }}
+                            tick={{ fill: '#a0a0a0', fontSize: 10 }}
                             tickFormatter={(value) => value.slice(5)}
-                            interval="preserveStartEnd"
+                            interval={20}
                           />
                           <YAxis
-                            tick={{ fill: '#a0a0a0', fontSize: 11 }}
+                            tick={{ fill: '#a0a0a0', fontSize: 10 }}
                             domain={['auto', 'auto']}
                             tickFormatter={(value) =>
                               ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
@@ -934,16 +995,47 @@ function App() {
                               background: 'rgba(26, 26, 46, 0.95)',
                               border: '1px solid rgba(255,255,255,0.2)',
                               borderRadius: '8px',
-                              color: '#fff'
+                              color: '#fff',
+                              fontSize: '12px'
                             }}
-                            formatter={(value) => [
-                              ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
+                            formatter={(value, name) => {
+                              if (value === null) return ['-', name]
+                              const formatted = ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
                                 ? `₩${value.toLocaleString()}`
-                                : `$${value.toFixed(2)}`,
-                              '종가'
-                            ]}
+                                : `$${typeof value === 'number' ? value.toFixed(2) : value}`
+                              const labels = {
+                                close: '종가', bb_upper: '볼린저 상단', bb_middle: '볼린저 중심',
+                                bb_lower: '볼린저 하단', ma5: 'MA5', ma20: 'MA20', ma60: 'MA60', ma120: 'MA120'
+                              }
+                              return [formatted, labels[name] || name]
+                            }}
                             labelFormatter={(label) => label}
                           />
+
+                          {/* 볼린저 밴드 */}
+                          {chartIndicators.bollinger && (
+                            <>
+                              <Area type="monotone" dataKey="bb_upper" stroke="#4ecdc4" strokeWidth={1} fill="none" dot={false} />
+                              <Area type="monotone" dataKey="bb_lower" stroke="#4ecdc4" strokeWidth={1} fill="none" dot={false} />
+                              <Line type="monotone" dataKey="bb_middle" stroke="#4ecdc4" strokeWidth={1} strokeDasharray="5 5" dot={false} />
+                            </>
+                          )}
+
+                          {/* 이동평균선 */}
+                          {chartIndicators.ma5 && <Line type="monotone" dataKey="ma5" stroke="#ff6b6b" strokeWidth={1} dot={false} />}
+                          {chartIndicators.ma20 && <Line type="monotone" dataKey="ma20" stroke="#ffd93d" strokeWidth={1} dot={false} />}
+                          {chartIndicators.ma60 && <Line type="monotone" dataKey="ma60" stroke="#6bcb77" strokeWidth={1} dot={false} />}
+                          {chartIndicators.ma120 && <Line type="monotone" dataKey="ma120" stroke="#9d4edd" strokeWidth={1} dot={false} />}
+
+                          {/* 지지선/저항선 */}
+                          {stockDetail.support_resistance?.resistance?.map((level, i) => (
+                            <ReferenceLine key={`res-${i}`} y={level} stroke="#ef4444" strokeDasharray="3 3" label={{ value: `R${i+1}`, fill: '#ef4444', fontSize: 10 }} />
+                          ))}
+                          {stockDetail.support_resistance?.support?.map((level, i) => (
+                            <ReferenceLine key={`sup-${i}`} y={level} stroke="#22c55e" strokeDasharray="3 3" label={{ value: `S${i+1}`, fill: '#22c55e', fontSize: 10 }} />
+                          ))}
+
+                          {/* 메인 가격선 */}
                           <Area
                             type="monotone"
                             dataKey="close"
@@ -952,8 +1044,104 @@ function App() {
                             fillOpacity={1}
                             fill="url(#colorPrice)"
                           />
-                        </AreaChart>
+                        </ComposedChart>
                       </ResponsiveContainer>
+                    </div>
+
+                    {/* 거래량 차트 */}
+                    {chartIndicators.volume && (
+                      <div className="chart-container sub-chart">
+                        <div className="sub-chart-title">거래량</div>
+                        <ResponsiveContainer width="100%" height={80}>
+                          <ComposedChart data={stockDetail.chart_data}>
+                            <XAxis dataKey="date" tick={false} axisLine={false} />
+                            <YAxis tick={{ fill: '#a0a0a0', fontSize: 9 }} tickFormatter={(v) => `${(v / 1000000).toFixed(0)}M`} width={40} />
+                            <Tooltip
+                              contentStyle={{ background: 'rgba(26, 26, 46, 0.95)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                              formatter={(value) => [`${(value / 1000000).toFixed(2)}M`, '거래량']}
+                            />
+                            <Bar dataKey="volume" fill="#667eea" fillOpacity={0.6} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* RSI 차트 */}
+                    {chartIndicators.rsi && (
+                      <div className="chart-container sub-chart">
+                        <div className="sub-chart-title">RSI (14)</div>
+                        <ResponsiveContainer width="100%" height={100}>
+                          <ComposedChart data={stockDetail.chart_data}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <XAxis dataKey="date" tick={false} axisLine={false} />
+                            <YAxis domain={[0, 100]} ticks={[30, 50, 70]} tick={{ fill: '#a0a0a0', fontSize: 9 }} width={30} />
+                            <Tooltip
+                              contentStyle={{ background: 'rgba(26, 26, 46, 0.95)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                              formatter={(value) => [value?.toFixed(2), 'RSI']}
+                            />
+                            <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="3 3" />
+                            <ReferenceLine y={30} stroke="#22c55e" strokeDasharray="3 3" />
+                            <Area type="monotone" dataKey="rsi" stroke="#f59e0b" strokeWidth={1.5} fill="#f59e0b" fillOpacity={0.2} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* MACD 차트 */}
+                    {chartIndicators.macd && (
+                      <div className="chart-container sub-chart">
+                        <div className="sub-chart-title">MACD (12, 26, 9)</div>
+                        <ResponsiveContainer width="100%" height={100}>
+                          <ComposedChart data={stockDetail.chart_data}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <XAxis dataKey="date" tick={{ fill: '#a0a0a0', fontSize: 9 }} tickFormatter={(v) => v.slice(5)} interval={20} />
+                            <YAxis tick={{ fill: '#a0a0a0', fontSize: 9 }} width={40} />
+                            <Tooltip
+                              contentStyle={{ background: 'rgba(26, 26, 46, 0.95)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '8px', color: '#fff', fontSize: '11px' }}
+                              formatter={(value, name) => {
+                                const labels = { macd: 'MACD', macd_signal: 'Signal', macd_histogram: 'Histogram' }
+                                return [value?.toFixed(2), labels[name] || name]
+                              }}
+                            />
+                            <ReferenceLine y={0} stroke="rgba(255,255,255,0.3)" />
+                            <Bar dataKey="macd_histogram" fill={(d) => d.macd_histogram >= 0 ? '#22c55e' : '#ef4444'}>
+                              {stockDetail.chart_data.map((entry, index) => (
+                                <Bar key={index} fill={entry.macd_histogram >= 0 ? '#22c55e' : '#ef4444'} />
+                              ))}
+                            </Bar>
+                            <Line type="monotone" dataKey="macd" stroke="#3b82f6" strokeWidth={1.5} dot={false} />
+                            <Line type="monotone" dataKey="macd_signal" stroke="#f59e0b" strokeWidth={1.5} dot={false} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* 지표 토글 (하단) */}
+                    <div className="indicator-toggles bottom-toggles">
+                      <label className={`toggle-btn ${chartIndicators.volume ? 'active' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={chartIndicators.volume}
+                          onChange={(e) => setChartIndicators({...chartIndicators, volume: e.target.checked})}
+                        />
+                        거래량
+                      </label>
+                      <label className={`toggle-btn ${chartIndicators.rsi ? 'active' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={chartIndicators.rsi}
+                          onChange={(e) => setChartIndicators({...chartIndicators, rsi: e.target.checked})}
+                        />
+                        RSI
+                      </label>
+                      <label className={`toggle-btn ${chartIndicators.macd ? 'active' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={chartIndicators.macd}
+                          onChange={(e) => setChartIndicators({...chartIndicators, macd: e.target.checked})}
+                        />
+                        MACD
+                      </label>
                     </div>
                   </div>
 

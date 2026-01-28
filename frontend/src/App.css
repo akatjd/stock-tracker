@@ -1183,16 +1183,90 @@ tr.oversold-row .rsi-badge {
   margin-bottom: 2rem;
 }
 
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chart-header h4 {
+  color: #fff;
+  margin: 0;
+  font-size: 1rem;
+}
+
 .chart-section h4 {
   color: #fff;
   margin-bottom: 1rem;
   font-size: 1rem;
 }
 
+.indicator-toggles {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.indicator-toggles .toggle-btn {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #a0a0a0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: all 0.2s;
+}
+
+.indicator-toggles .toggle-btn input {
+  display: none;
+}
+
+.indicator-toggles .toggle-btn.active {
+  background: rgba(102, 126, 234, 0.3);
+  border-color: #667eea;
+  color: #fff;
+}
+
+.indicator-toggles .toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.bottom-toggles {
+  margin-top: 1rem;
+  justify-content: center;
+}
+
 .chart-container {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 12px;
   padding: 1rem;
+}
+
+.chart-container.main-chart {
+  margin-bottom: 0.5rem;
+}
+
+.chart-container.sub-chart {
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.25rem;
+  position: relative;
+}
+
+.sub-chart-title {
+  position: absolute;
+  top: 0.5rem;
+  left: 1rem;
+  font-size: 0.7rem;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* 재무 정보 */
