@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Area, AreaChart, ComposedChart, Bar, ReferenceLine, Legend, Cell
 } from 'recharts'
+import TradingChart from './components/TradingChart'
 import './App.css'
 
 function App() {
@@ -1041,89 +1042,14 @@ function App() {
                       </div>
                     </div>
 
-                    {/* 메인 가격 차트 */}
-                    <div className="chart-container main-chart">
-                      <ResponsiveContainer width="100%" height={350}>
-                        <ComposedChart data={stockDetail.chart_data}>
-                          <defs>
-                            <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#667eea" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#667eea" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                          <XAxis
-                            dataKey="date"
-                            tick={{ fill: '#a0a0a0', fontSize: 10 }}
-                            tickFormatter={(value) => value.slice(5)}
-                            interval={20}
-                          />
-                          <YAxis
-                            tick={{ fill: '#a0a0a0', fontSize: 10 }}
-                            domain={['auto', 'auto']}
-                            tickFormatter={(value) =>
-                              ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
-                                ? `${(value / 1000).toFixed(0)}K`
-                                : `$${value.toFixed(0)}`
-                            }
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              background: 'rgba(26, 26, 46, 0.95)',
-                              border: '1px solid rgba(255,255,255,0.2)',
-                              borderRadius: '8px',
-                              color: '#fff',
-                              fontSize: '12px'
-                            }}
-                            formatter={(value, name) => {
-                              if (value === null) return ['-', name]
-                              const formatted = ['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
-                                ? `₩${value.toLocaleString()}`
-                                : `$${typeof value === 'number' ? value.toFixed(2) : value}`
-                              const labels = {
-                                close: '종가', bb_upper: '볼린저 상단', bb_middle: '볼린저 중심',
-                                bb_lower: '볼린저 하단', ma5: 'MA5', ma20: 'MA20', ma60: 'MA60', ma120: 'MA120'
-                              }
-                              return [formatted, labels[name] || name]
-                            }}
-                            labelFormatter={(label) => label}
-                          />
-
-                          {/* 볼린저 밴드 */}
-                          {chartIndicators.bollinger && (
-                            <>
-                              <Area type="monotone" dataKey="bb_upper" stroke="#4ecdc4" strokeWidth={1} fill="none" dot={false} />
-                              <Area type="monotone" dataKey="bb_lower" stroke="#4ecdc4" strokeWidth={1} fill="none" dot={false} />
-                              <Line type="monotone" dataKey="bb_middle" stroke="#4ecdc4" strokeWidth={1} strokeDasharray="5 5" dot={false} />
-                            </>
-                          )}
-
-                          {/* 이동평균선 */}
-                          {chartIndicators.ma5 && <Line type="monotone" dataKey="ma5" stroke="#ff6b6b" strokeWidth={1} dot={false} />}
-                          {chartIndicators.ma20 && <Line type="monotone" dataKey="ma20" stroke="#ffd93d" strokeWidth={1} dot={false} />}
-                          {chartIndicators.ma60 && <Line type="monotone" dataKey="ma60" stroke="#6bcb77" strokeWidth={1} dot={false} />}
-                          {chartIndicators.ma120 && <Line type="monotone" dataKey="ma120" stroke="#9d4edd" strokeWidth={1} dot={false} />}
-
-                          {/* 지지선/저항선 */}
-                          {stockDetail.support_resistance?.resistance?.map((level, i) => (
-                            <ReferenceLine key={`res-${i}`} y={level} stroke="#ef4444" strokeDasharray="3 3" label={{ value: `R${i+1}`, fill: '#ef4444', fontSize: 10 }} />
-                          ))}
-                          {stockDetail.support_resistance?.support?.map((level, i) => (
-                            <ReferenceLine key={`sup-${i}`} y={level} stroke="#22c55e" strokeDasharray="3 3" label={{ value: `S${i+1}`, fill: '#22c55e', fontSize: 10 }} />
-                          ))}
-
-                          {/* 메인 가격선 */}
-                          <Area
-                            type="monotone"
-                            dataKey="close"
-                            stroke="#667eea"
-                            strokeWidth={2}
-                            fillOpacity={1}
-                            fill="url(#colorPrice)"
-                          />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
+                    {/* 메인 가격 차트 (캔들스틱 + 추세선 그리기) */}
+                    <TradingChart
+                      data={stockDetail.chart_data}
+                      indicators={chartIndicators}
+                      supportResistance={stockDetail.support_resistance}
+                      isKorean={['KOSPI', 'KOSDAQ'].includes(stockDetail.market)}
+                      height={400}
+                    />
 
                     {/* 거래량 차트 */}
                     {chartIndicators.volume && (

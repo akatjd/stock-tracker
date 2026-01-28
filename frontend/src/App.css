@@ -1456,3 +1456,80 @@ tr.oversold-row .rsi-badge {
     max-height: calc(100vh - 2rem);
   }
 }
+
+/* TradingChart 스타일 */
+.trading-chart-wrapper {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.drawing-tools {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.draw-btn {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  color: #a0a0a0;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.draw-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.draw-btn.active {
+  background: rgba(245, 158, 11, 0.3);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.draw-btn.clear {
+  margin-left: auto;
+}
+
+.draw-btn.clear:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.draw-hint {
+  font-size: 0.7rem;
+  color: #f59e0b;
+  margin-left: 0.5rem;
+}
+
+.chart-wrapper {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chart-help {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.7rem;
+  color: #666;
+  justify-content: center;
+}
+
+.chart-help span {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
