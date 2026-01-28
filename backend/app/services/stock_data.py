@@ -807,13 +807,15 @@ class StockDataService:
                 "message": f"검증 중 오류가 발생했습니다: {str(e)}"
             }
 
-    def get_stock_detail(self, symbol: str, market: str) -> Dict:
+    def get_stock_detail(self, symbol: str, market: str, period: str = "6mo", interval: str = "1d") -> Dict:
         """
         종목 상세 정보 조회 (차트 데이터 + 재무제표)
 
         Args:
             symbol: 종목 코드/심볼
             market: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)
+            period: 데이터 기간 (1mo, 3mo, 6mo, 1y, 2y, 5y)
+            interval: 봉 타입 (1h, 4h, 1d, 1wk, 1mo)
 
         Returns:
             상세 정보 딕셔너리
@@ -823,24 +825,37 @@ class StockDataService:
             is_korean = market in ['KOSPI', 'KOSDAQ']
 
             if is_korean:
-                return self._get_kr_stock_detail(symbol, market)
+                return self._get_kr_stock_detail(symbol, market, period, interval)
             else:
-                return self._get_us_stock_detail(symbol, market)
+                return self._get_us_stock_detail(symbol, market, period, interval)
 
         except Exception as e:
             logger.error(f"Failed to get stock detail for {symbol}: {e}")
             return {"error": str(e)}
 
-    def _get_kr_stock_detail(self, symbol: str, market: str) -> Dict:
+    def _get_kr_stock_detail(self, symbol: str, market: str, period: str = "6mo", interval: str = "1d") -> Dict:
         """한국 주식 상세 정보"""
         try:
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=365)  # 1년 데이터
+            # 기간 설정
+            period_days = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+            days = period_days.get(period, 180)
 
-            # 가격 데이터 조회
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days)
+
+            # 가격 데이터 조회 (한국 주식은 일봉만 지원)
             df = fdr.DataReader(symbol, start_date, end_date)
             if df.empty:
                 return {"error": "가격 데이터를 찾을 수 없습니다."}
+
+            # 주봉/월봉으로 리샘플링
+            if interval == '1wk':
+                df = resample_to_period(df, 'week')
+            elif interval == '1mo':
+                df = resample_to_period(df, 'month')
+            elif interval in ['1h', '4h']:
+                # 한국 주식은 시간봉 미지원 - 일봉으로 대체
+                pass
 
             # 종목명 조회
             stocks = self.get_kospi_symbols_detailed() if market == 'KOSPI' else self.get_kosdaq_symbols_detailed()
@@ -868,12 +883,12 @@ class StockDataService:
             # 지지선/저항선
             support_resistance = calculate_support_resistance(df)
 
-            # 차트 데이터 (최근 6개월) - 기술적 지표 포함
-            chart_df = df.tail(120)
+            # 차트 데이터 - 기술적 지표 포함
             chart_data = []
-            for idx, (date, row) in enumerate(chart_df.iterrows()):
+            for idx, (date, row) in enumerate(df.iterrows()):
+                date_str = date.strftime("%Y-%m-%d %H:%M") if interval in ['1h', '4h'] else date.strftime("%Y-%m-%d")
                 data_point = {
-                    "date": date.strftime("%Y-%m-%d"),
+                    "date": date_str,
                     "open": int(row['Open']),
                     "high": int(row['High']),
                     "low": int(row['Low']),
@@ -903,9 +918,10 @@ class StockDataService:
             change = current_price - prev_close
             change_percent = round((change / prev_close) * 100, 2) if prev_close > 0 else 0
 
-            # 52주 최고/최저
-            high_52w = int(df['High'].max())
-            low_52w = int(df['Low'].min())
+            # 52주 최고/최저 (원본 데이터 기준)
+            df_1y = fdr.DataReader(symbol, end_date - timedelta(days=365), end_date)
+            high_52w = int(df_1y['High'].max()) if not df_1y.empty else int(df['High'].max())
+            low_52w = int(df_1y['Low'].min()) if not df_1y.empty else int(df['Low'].min())
 
             # 현재 RSI
             from app.services.rsi_calculator import calculate_rsi
@@ -924,6 +940,8 @@ class StockDataService:
                 "symbol": symbol,
                 "name": name,
                 "market": market,
+                "period": period,
+                "interval": interval if interval not in ['1h', '4h'] else '1d',
                 "current_price": current_price,
                 "change": change,
                 "change_percent": change_percent,
@@ -955,16 +973,43 @@ class StockDataService:
             "message": "한국 주식 재무제표는 현재 지원되지 않습니다."
         }
 
-    def _get_us_stock_detail(self, symbol: str, market: str) -> Dict:
+    def _get_us_stock_detail(self, symbol: str, market: str, period: str = "6mo", interval: str = "1d") -> Dict:
         """미국 주식 상세 정보"""
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info
 
-            # 가격 데이터 (1년)
-            hist = ticker.history(period="1y")
+            # 시간봉의 경우 yfinance 제한 고려
+            # 1h: 최대 730일, 4h: 없음(1h로 대체 후 리샘플링)
+            yf_interval = interval
+            if interval == '4h':
+                yf_interval = '1h'  # 4시간봉은 1시간봉을 리샘플링
+
+            # 시간봉의 경우 기간 제한
+            yf_period = period
+            if interval in ['1h', '4h']:
+                # 시간봉은 최대 60일
+                if period in ['1y', '2y', '5y']:
+                    yf_period = '60d'
+                elif period == '6mo':
+                    yf_period = '60d'
+                elif period == '3mo':
+                    yf_period = '60d'
+
+            # 가격 데이터 조회
+            hist = ticker.history(period=yf_period, interval=yf_interval)
             if hist.empty:
                 return {"error": "가격 데이터를 찾을 수 없습니다."}
+
+            # 4시간봉 리샘플링
+            if interval == '4h' and yf_interval == '1h':
+                hist = hist.resample('4h').agg({
+                    'Open': 'first',
+                    'High': 'max',
+                    'Low': 'min',
+                    'Close': 'last',
+                    'Volume': 'sum'
+                }).dropna()
 
             # 기술적 지표 계산
             close_prices = hist['Close']
@@ -987,12 +1032,17 @@ class StockDataService:
             # 지지선/저항선
             support_resistance = calculate_support_resistance(hist)
 
-            # 차트 데이터 (최근 6개월) - 기술적 지표 포함
-            chart_df = hist.tail(120)
+            # 차트 데이터 - 기술적 지표 포함
             chart_data = []
-            for idx, (date, row) in enumerate(chart_df.iterrows()):
+            for idx, (date, row) in enumerate(hist.iterrows()):
+                # 시간봉은 시간 포함, 일봉 이상은 날짜만
+                if interval in ['1h', '4h']:
+                    date_str = date.strftime("%m/%d %H:%M")
+                else:
+                    date_str = date.strftime("%Y-%m-%d")
+
                 data_point = {
-                    "date": date.strftime("%Y-%m-%d"),
+                    "date": date_str,
                     "open": round(row['Open'], 2),
                     "high": round(row['High'], 2),
                     "low": round(row['Low'], 2),
@@ -1022,9 +1072,10 @@ class StockDataService:
             change = round(current_price - prev_close, 2)
             change_percent = round((change / prev_close) * 100, 2) if prev_close > 0 else 0
 
-            # 52주 최고/최저
-            high_52w = round(hist['High'].max(), 2)
-            low_52w = round(hist['Low'].min(), 2)
+            # 52주 최고/최저 (항상 일봉 기준)
+            hist_1y = ticker.history(period="1y")
+            high_52w = round(hist_1y['High'].max(), 2) if not hist_1y.empty else round(hist['High'].max(), 2)
+            low_52w = round(hist_1y['Low'].min(), 2) if not hist_1y.empty else round(hist['Low'].min(), 2)
 
             # 현재 RSI
             from app.services.rsi_calculator import calculate_rsi
@@ -1040,6 +1091,8 @@ class StockDataService:
                 "symbol": symbol,
                 "name": info.get('shortName') or info.get('longName') or symbol,
                 "market": market,
+                "period": period,
+                "interval": interval,
                 "current_price": current_price,
                 "change": change,
                 "change_percent": change_percent,

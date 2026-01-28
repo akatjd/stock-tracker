@@ -400,17 +400,21 @@ async def validate_stock(
 @app.get("/api/v1/stock/detail/{symbol}")
 async def get_stock_detail(
     symbol: str,
-    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)")
+    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)"),
+    period: str = Query("6mo", description="기간 (1mo, 3mo, 6mo, 1y, 2y, 5y)"),
+    interval: str = Query("1d", description="봉 타입 (1h, 4h, 1d, 1wk, 1mo)")
 ):
     """
     종목 상세 정보 조회 (차트 데이터 + 재무제표)
 
     - **symbol**: 종목코드 또는 심볼
     - **market**: 시장
+    - **period**: 데이터 기간 (1mo, 3mo, 6mo, 1y, 2y, 5y)
+    - **interval**: 봉 타입 (1h, 4h, 1d, 1wk, 1mo)
 
     Returns:
         - 기본 정보 (가격, 등락률, 52주 최고/최저 등)
-        - 차트 데이터 (6개월)
+        - 차트 데이터
         - 재무제표 정보
     """
     loop = asyncio.get_event_loop()
@@ -418,7 +422,7 @@ async def get_stock_detail(
     with ThreadPoolExecutor() as executor:
         result = await loop.run_in_executor(
             executor,
-            lambda: stock_service.get_stock_detail(symbol, market)
+            lambda: stock_service.get_stock_detail(symbol, market, period, interval)
         )
 
     return result

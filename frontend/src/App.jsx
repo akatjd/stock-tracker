@@ -23,6 +23,9 @@ function App() {
     rsi: true,
     macd: true
   })
+  // 차트 기간/봉 타입 상태
+  const [chartPeriod, setChartPeriod] = useState('6mo')  // 1mo, 3mo, 6mo, 1y, 2y, 5y
+  const [chartInterval, setChartInterval] = useState('1d')  // 1h, 4h, 1d, 1wk, 1mo
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -186,7 +189,7 @@ function App() {
   }
 
   // 종목 상세 정보 조회
-  const fetchStockDetail = async (stock) => {
+  const fetchStockDetail = async (stock, period = chartPeriod, interval = chartInterval) => {
     setSelectedStock(stock)
     setIsLoadingDetail(true)
     setShowDetail(true)
@@ -194,7 +197,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(stock.symbol)}?market=${encodeURIComponent(stock.market)}`
+        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(stock.symbol)}?market=${encodeURIComponent(stock.market)}&period=${period}&interval=${interval}`
       )
       const data = await response.json()
 
@@ -210,11 +213,38 @@ function App() {
     }
   }
 
+  // 차트 기간/봉 타입 변경 시 데이터 새로고침
+  const refreshChartData = async (newPeriod, newInterval) => {
+    if (!selectedStock) return
+
+    setChartPeriod(newPeriod)
+    setChartInterval(newInterval)
+    setIsLoadingDetail(true)
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(selectedStock.symbol)}?market=${encodeURIComponent(selectedStock.market)}&period=${newPeriod}&interval=${newInterval}`
+      )
+      const data = await response.json()
+
+      if (!data.error) {
+        setStockDetail(data)
+      }
+    } catch (err) {
+      console.error('Failed to refresh chart data:', err)
+    } finally {
+      setIsLoadingDetail(false)
+    }
+  }
+
   // 상세 모달 닫기
   const closeDetail = () => {
     setShowDetail(false)
     setSelectedStock(null)
     setStockDetail(null)
+    // 초기값으로 리셋
+    setChartPeriod('6mo')
+    setChartInterval('1d')
   }
 
   // 숫자 포맷팅 (억/조 단위)
@@ -918,8 +948,55 @@ function App() {
 
                   {/* 차트 지표 토글 */}
                   <div className="chart-section">
+                    {/* 기간/봉 타입 선택 */}
+                    <div className="chart-controls">
+                      <div className="control-group">
+                        <span className="control-label">기간</span>
+                        <div className="control-buttons">
+                          {[
+                            { value: '1mo', label: '1개월' },
+                            { value: '3mo', label: '3개월' },
+                            { value: '6mo', label: '6개월' },
+                            { value: '1y', label: '1년' },
+                            { value: '2y', label: '2년' },
+                            { value: '5y', label: '5년' }
+                          ].map(p => (
+                            <button
+                              key={p.value}
+                              className={`control-btn ${chartPeriod === p.value ? 'active' : ''}`}
+                              onClick={() => refreshChartData(p.value, chartInterval)}
+                              disabled={isLoadingDetail}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="control-group">
+                        <span className="control-label">봉 타입</span>
+                        <div className="control-buttons">
+                          {[
+                            { value: '1h', label: '1시간' },
+                            { value: '4h', label: '4시간' },
+                            { value: '1d', label: '일봉' },
+                            { value: '1wk', label: '주봉' },
+                            { value: '1mo', label: '월봉' }
+                          ].map(i => (
+                            <button
+                              key={i.value}
+                              className={`control-btn ${chartInterval === i.value ? 'active' : ''}`}
+                              onClick={() => refreshChartData(chartPeriod, i.value)}
+                              disabled={isLoadingDetail}
+                            >
+                              {i.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="chart-header">
-                      <h4>기술적 분석 차트</h4>
+                      <h4>기술적 분석 차트 {stockDetail.interval && `(${stockDetail.interval})`}</h4>
                       <div className="indicator-toggles">
                         <label className={`toggle-btn ${chartIndicators.ma5 ? 'active' : ''}`}>
                           <input
