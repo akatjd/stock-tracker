@@ -12,6 +12,23 @@ from app.models.stock import SECTOR_MAPPING
 logger = logging.getLogger(__name__)
 
 
+def translate_to_korean(text: str) -> str:
+    """영어 텍스트를 한국어로 번역"""
+    if not text:
+        return text
+    try:
+        from deep_translator import GoogleTranslator
+        translator = GoogleTranslator(source='en', target='ko')
+        # 텍스트가 너무 길면 분할 번역 (Google Translate 제한)
+        if len(text) > 4500:
+            text = text[:4500]
+        translated = translator.translate(text)
+        return translated
+    except Exception as e:
+        logger.warning(f"Translation failed: {e}")
+        return text  # 번역 실패 시 원문 반환
+
+
 def resample_to_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     """
     일봉 데이터를 주봉 또는 월봉으로 변환
@@ -906,6 +923,13 @@ class StockDataService:
     def _get_us_financials(self, info: Dict) -> Dict:
         """미국 주식 재무제표 정보"""
         try:
+            # 기업 소개 번역
+            description_en = info.get('longBusinessSummary', '')
+            description_kr = ''
+            if description_en:
+                # 500자로 제한 후 번역
+                description_kr = translate_to_korean(description_en[:500])
+
             return {
                 "available": True,
                 "per": info.get('trailingPE'),  # PER
@@ -920,7 +944,7 @@ class StockDataService:
                 "profit_margin": info.get('profitMargins'),  # 이익률
                 "sector": info.get('sector'),
                 "industry": info.get('industry'),
-                "description": info.get('longBusinessSummary', '')[:500]  # 기업 설명 (500자 제한)
+                "description": description_kr  # 한국어로 번역된 기업 설명
             }
         except Exception as e:
             logger.error(f"Failed to get US financials: {e}")
