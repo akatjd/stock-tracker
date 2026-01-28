@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Area, AreaChart, ComposedChart, Bar, ReferenceLine, Legend
+  Area, AreaChart, ComposedChart, Bar, ReferenceLine, Legend, Cell
 } from 'recharts'
 import './App.css'
 
@@ -1104,9 +1104,9 @@ function App() {
                               }}
                             />
                             <ReferenceLine y={0} stroke="rgba(255,255,255,0.3)" />
-                            <Bar dataKey="macd_histogram" fill={(d) => d.macd_histogram >= 0 ? '#22c55e' : '#ef4444'}>
+                            <Bar dataKey="macd_histogram">
                               {stockDetail.chart_data.map((entry, index) => (
-                                <Bar key={index} fill={entry.macd_histogram >= 0 ? '#22c55e' : '#ef4444'} />
+                                <Cell key={index} fill={entry.macd_histogram >= 0 ? '#22c55e' : '#ef4444'} />
                               ))}
                             </Bar>
                             <Line type="monotone" dataKey="macd" stroke="#3b82f6" strokeWidth={1.5} dot={false} />
