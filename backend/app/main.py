@@ -301,7 +301,7 @@ async def preview_scan_stocks(
 
         # DOW
         if market in ["dow", "us", "all"]:
-            dow_symbols = stock_service.get_dow_symbols()
+            dow_symbols = stock_service.get_dow_symbols()[:limit]
             all_stocks.extend([{"symbol": s, "name": s, "market": "DOW"} for s in dow_symbols])
 
         # KOSPI

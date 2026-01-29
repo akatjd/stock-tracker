@@ -605,7 +605,7 @@ class StockDataService:
             all_stocks.extend([{"symbol": s, "market": "NASDAQ", "type": "us"} for s in nasdaq_symbols])
 
         if market in ["dow", "us", "all"]:
-            dow_symbols = self.get_dow_symbols()
+            dow_symbols = self.get_dow_symbols()[:limit]
             all_stocks.extend([{"symbol": s, "market": "DOW", "type": "us"} for s in dow_symbols])
 
         if market in ["kospi", "kr", "all"]:

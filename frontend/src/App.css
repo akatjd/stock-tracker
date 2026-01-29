@@ -1533,3 +1533,96 @@ tr.oversold-row .rsi-badge {
   align-items: center;
   gap: 0.3rem;
 }
+
+/* 전체 화면 차트 */
+.trading-chart-fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: rgba(10, 10, 20, 0.98);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.trading-chart-wrapper.fullscreen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.trading-chart-wrapper.fullscreen .chart-wrapper {
+  flex: 1;
+  min-height: 0;
+}
+
+.trading-chart-wrapper.fullscreen .drawing-tools {
+  flex-shrink: 0;
+}
+
+.trading-chart-wrapper.fullscreen .chart-help {
+  flex-shrink: 0;
+}
+
+/* 거래량 높이 조절 컨트롤 */
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.volume-control span {
+  font-size: 0.75rem;
+  color: #a0a0a0;
+}
+
+.volume-control input[type="range"] {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.volume-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: #667eea;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.volume-control input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: #667eea;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+/* 거래량 차트 높이 조절 핸들 */
+.volume-resize-handle {
+  opacity: 0.3;
+  transition: opacity 0.2s;
+}
+
+.volume-resize-handle:hover {
+  opacity: 1;
+}
+
+.volume-resize-handle:hover div {
+  background-color: #667eea !important;
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
