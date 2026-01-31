@@ -52,6 +52,8 @@ const TradingChart = ({
   const canvasRef = useRef(null)
   const [magnetMode, setMagnetMode] = useState(true) // 자석 모드 (봉 고가/저가 스냅)
   const candleDataRef = useRef([]) // 캔들 데이터 참조용
+  const [magnetPreview, setMagnetPreview] = useState(null) // 자석 미리보기 { x, y, price, isHigh }
+  const [scaleVersion, setScaleVersion] = useState(0) // 차트 스케일 변경 감지용
 
   // 전체 화면 상태
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -377,6 +379,35 @@ const TradingChart = ({
     return () => window.removeEventListener('resize', resizeCanvas)
   }, [data, height, trendLines, isFullscreen])
 
+  // 차트 스케일/이동 변경 시 선 다시 그리기
+  useEffect(() => {
+    if (!chartRef.current) return
+
+    const chart = chartRef.current
+
+    // 스케일/이동 변경 구독 - 상태 업데이트로 리렌더 트리거
+    const handleScaleChange = () => {
+      setScaleVersion(v => v + 1)
+    }
+
+    // 논리적 범위 변경 (줌)
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleScaleChange)
+    // 시간 범위 변경 (스크롤/이동)
+    chart.timeScale().subscribeVisibleTimeRangeChange(handleScaleChange)
+    // 크로스헤어 이동 (마우스 이동 시 - 더 즉각적인 반응)
+    chart.subscribeCrosshairMove(handleScaleChange)
+
+    return () => {
+      try {
+        chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleScaleChange)
+        chart.timeScale().unsubscribeVisibleTimeRangeChange(handleScaleChange)
+        chart.unsubscribeCrosshairMove(handleScaleChange)
+      } catch (e) {
+        // 차트가 이미 제거된 경우 무시
+      }
+    }
+  }, [data])
+
   // 그리기 모드일 때 차트 인터랙션 비활성화
   useEffect(() => {
     if (!chartRef.current) return
@@ -409,10 +440,40 @@ const TradingChart = ({
     }
   }, [drawMode])
 
+  // 픽셀 좌표를 차트 좌표(시간/가격)로 변환
+  const pixelToChartCoords = (x, y) => {
+    if (!chartRef.current || !candleSeriesRef.current) return null
+    try {
+      const chart = chartRef.current
+      const series = candleSeriesRef.current
+      const time = chart.timeScale().coordinateToTime(x)
+      const price = series.coordinateToPrice(y)
+      if (time === null || price === null) return null
+      return { time, price }
+    } catch (e) {
+      return null
+    }
+  }
+
+  // 차트 좌표를 픽셀 좌표로 변환
+  const chartToPixelCoords = (time, price) => {
+    if (!chartRef.current || !candleSeriesRef.current) return null
+    try {
+      const chart = chartRef.current
+      const series = candleSeriesRef.current
+      const x = chart.timeScale().timeToCoordinate(time)
+      const y = series.priceToCoordinate(price)
+      if (x === null || y === null) return null
+      return { x, y }
+    } catch (e) {
+      return null
+    }
+  }
+
   // 자석 기능: 마우스 좌표를 가장 가까운 봉의 고가/저가로 스냅
   const snapToCandle = (x, y) => {
     if (!magnetMode || !chartRef.current || !candleSeriesRef.current || candleDataRef.current.length === 0) {
-      return { x, y }
+      return { x, y, snapped: false, time: null, price: null }
     }
 
     try {
@@ -422,7 +483,7 @@ const TradingChart = ({
 
       // x 좌표를 시간으로 변환
       const time = timeScale.coordinateToTime(x)
-      if (!time) return { x, y }
+      if (!time) return { x, y, snapped: false }
 
       // 가장 가까운 캔들 찾기
       let nearestCandle = null
@@ -441,28 +502,30 @@ const TradingChart = ({
         }
       }
 
-      if (!nearestCandle) return { x, y }
+      if (!nearestCandle) return { x, y, snapped: false }
 
       // 캔들의 시간 좌표
       const candleX = timeScale.timeToCoordinate(nearestCandle.time)
-      if (candleX === null) return { x, y }
+      if (candleX === null) return { x, y, snapped: false }
 
       // 고가와 저가의 y 좌표 계산
       const highY = series.priceToCoordinate(nearestCandle.high)
       const lowY = series.priceToCoordinate(nearestCandle.low)
 
-      if (highY === null || lowY === null) return { x, y }
+      if (highY === null || lowY === null) return { x, y, snapped: false }
 
       // 마우스 y 좌표와 더 가까운 쪽으로 스냅
       const distToHigh = Math.abs(y - highY)
       const distToLow = Math.abs(y - lowY)
 
-      const snappedY = distToHigh < distToLow ? highY : lowY
+      const isHigh = distToHigh < distToLow
+      const snappedY = isHigh ? highY : lowY
+      const price = isHigh ? nearestCandle.high : nearestCandle.low
 
-      return { x: candleX, y: snappedY }
+      return { x: candleX, y: snappedY, snapped: true, isHigh, price, time: nearestCandle.time }
     } catch (e) {
       console.error('Snap error:', e)
-      return { x, y }
+      return { x, y, snapped: false, time: null, price: null }
     }
   }
 
@@ -478,27 +541,81 @@ const TradingChart = ({
     const rawY = e.clientY - rect.top
 
     // 자석 모드 적용
-    const { x, y } = snapToCandle(rawX, rawY)
+    const snapResult = snapToCandle(rawX, rawY)
+    const { x, y } = snapResult
 
-    console.log('Drawing started at:', x, y, '(raw:', rawX, rawY, ')')
+    // 차트 좌표도 저장 (자석 모드면 스냅된 값, 아니면 변환)
+    let startTime, startPrice
+    if (snapResult.snapped) {
+      startTime = snapResult.time
+      startPrice = snapResult.price
+    } else {
+      const coords = pixelToChartCoords(x, y)
+      startTime = coords?.time
+      startPrice = coords?.price
+    }
+
+    console.log('Drawing started at:', x, y, 'time:', startTime, 'price:', startPrice)
     setIsDrawing(true)
-    setCurrentLine({ startX: x, startY: y, endX: x, endY: y })
+    setCurrentLine({
+      startX: x, startY: y, endX: x, endY: y,
+      startTime, startPrice, endTime: startTime, endPrice: startPrice
+    })
   }
 
   const handleCanvasMouseMove = (e) => {
-    if (!isDrawing || !currentLine || !canvasRef.current) return
-
-    e.preventDefault()
-    e.stopPropagation()
+    if (!canvasRef.current) return
 
     const rect = canvasRef.current.getBoundingClientRect()
     const rawX = e.clientX - rect.left
     const rawY = e.clientY - rect.top
 
-    // 자석 모드 적용
-    const { x, y } = snapToCandle(rawX, rawY)
+    // 자석 모드 적용 및 미리보기 업데이트
+    const snapResult = snapToCandle(rawX, rawY)
 
-    setCurrentLine(prev => ({ ...prev, endX: x, endY: y }))
+    if (magnetMode && snapResult.snapped) {
+      setMagnetPreview({
+        x: snapResult.x,
+        y: snapResult.y,
+        price: snapResult.price,
+        isHigh: snapResult.isHigh
+      })
+    } else {
+      setMagnetPreview(null)
+    }
+
+    // 그리기 중일 때 선 업데이트
+    if (isDrawing && currentLine) {
+      e.preventDefault()
+      e.stopPropagation()
+
+      // 차트 좌표도 업데이트
+      let endTime, endPrice
+      if (snapResult.snapped) {
+        endTime = snapResult.time
+        endPrice = snapResult.price
+      } else {
+        const coords = pixelToChartCoords(snapResult.x, snapResult.y)
+        endTime = coords?.time
+        endPrice = coords?.price
+      }
+
+      setCurrentLine(prev => ({
+        ...prev,
+        endX: snapResult.x,
+        endY: snapResult.y,
+        endTime,
+        endPrice
+      }))
+    }
+  }
+
+  // 캔버스에서 마우스가 나갈 때 미리보기 숨김
+  const handleCanvasMouseLeave = (e) => {
+    setMagnetPreview(null)
+    if (isDrawing && currentLine) {
+      handleCanvasMouseUp(e)
+    }
   }
 
   const handleCanvasMouseUp = (e) => {
@@ -513,6 +630,17 @@ const TradingChart = ({
     setIsDrawing(false)
   }
 
+  // 오른쪽 클릭 시 그리기 모드 해제
+  const handleCanvasContextMenu = (e) => {
+    e.preventDefault()
+    if (drawMode) {
+      setDrawMode(null)
+      setCurrentLine(null)
+      setIsDrawing(false)
+      setMagnetPreview(null)
+    }
+  }
+
   // 캔버스에 추세선 그리기
   const drawLines = () => {
     if (!canvasRef.current) return
@@ -525,23 +653,57 @@ const TradingChart = ({
     ctx.clearRect(0, 0, rect.width, rect.height)
 
     // 저장된 추세선 그리기
-    trendLines.forEach(line => {
+    trendLines.forEach((line, idx) => {
+      // 차트 좌표가 있으면 현재 스케일에 맞게 픽셀 좌표 계산
+      let startX = line.startX
+      let startY = line.startY
+      let endX = line.endX
+      let endY = line.endY
+
+      console.log(`Line ${idx} chart coords:`, {
+        startTime: line.startTime,
+        startPrice: line.startPrice,
+        endTime: line.endTime,
+        endPrice: line.endPrice
+      })
+
+      if (line.startTime !== undefined && line.startPrice !== undefined) {
+        const startCoords = chartToPixelCoords(line.startTime, line.startPrice)
+        console.log(`Line ${idx} start pixel coords:`, startCoords)
+        if (startCoords) {
+          startX = startCoords.x
+          startY = startCoords.y
+        }
+      }
+      if (line.endTime !== undefined && line.endPrice !== undefined) {
+        const endCoords = chartToPixelCoords(line.endTime, line.endPrice)
+        console.log(`Line ${idx} end pixel coords:`, endCoords)
+        if (endCoords) {
+          endX = endCoords.x
+          endY = endCoords.y
+        }
+      }
+
       ctx.beginPath()
       ctx.strokeStyle = '#f59e0b'
       ctx.lineWidth = 2
-      ctx.moveTo(line.startX, line.startY)
+      ctx.moveTo(startX, startY)
 
       if (line.mode === 'horizontal') {
-        ctx.lineTo(rect.width, line.startY)
+        ctx.lineTo(rect.width, startY)
+        ctx.moveTo(0, startY)
+        ctx.lineTo(startX, startY)
       } else if (line.mode === 'ray') {
-        const dx = line.endX - line.startX
-        const dy = line.endY - line.startY
+        const dx = endX - startX
+        const dy = endY - startY
         const length = Math.sqrt(dx * dx + dy * dy)
-        const unitX = dx / length
-        const unitY = dy / length
-        ctx.lineTo(line.startX + unitX * 2000, line.startY + unitY * 2000)
+        if (length > 0) {
+          const unitX = dx / length
+          const unitY = dy / length
+          ctx.lineTo(startX + unitX * 3000, startY + unitY * 3000)
+        }
       } else {
-        ctx.lineTo(line.endX, line.endY)
+        ctx.lineTo(endX, endY)
       }
 
       ctx.stroke()
@@ -563,6 +725,35 @@ const TradingChart = ({
 
       ctx.stroke()
       ctx.setLineDash([])
+    }
+
+    // 자석 미리보기 표시
+    if (magnetPreview && drawMode) {
+      const { x, y, price, isHigh } = magnetPreview
+
+      // 원형 마커
+      ctx.beginPath()
+      ctx.arc(x, y, 6, 0, Math.PI * 2)
+      ctx.fillStyle = isHigh ? '#22c55e' : '#ef4444' // 고가: 녹색, 저가: 빨간색
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      // 가격 라벨
+      const label = `${isHigh ? '고' : '저'} ${price?.toLocaleString()}`
+      ctx.font = 'bold 12px sans-serif'
+      const textWidth = ctx.measureText(label).width
+      const labelX = x + 10
+      const labelY = y - 10
+
+      // 라벨 배경
+      ctx.fillStyle = isHigh ? 'rgba(34, 197, 94, 0.9)' : 'rgba(239, 68, 68, 0.9)'
+      ctx.fillRect(labelX - 4, labelY - 12, textWidth + 8, 16)
+
+      // 라벨 텍스트
+      ctx.fillStyle = '#fff'
+      ctx.fillText(label, labelX, labelY)
     }
   }
 
@@ -636,7 +827,7 @@ const TradingChart = ({
 
   useEffect(() => {
     drawLines()
-  }, [trendLines, currentLine, drawMode])
+  }, [trendLines, currentLine, drawMode, magnetPreview, scaleVersion])
 
   const chartContent = (
     <>
@@ -714,7 +905,8 @@ const TradingChart = ({
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseLeave}
+          onContextMenu={handleCanvasContextMenu}
         />
 
         {/* 거래량 높이 조절 핸들 */}

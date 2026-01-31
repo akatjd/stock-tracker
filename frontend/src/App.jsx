@@ -1148,66 +1148,259 @@ function App() {
                     </div>
                   </div>
 
-                  {/* 재무제표 (미국 주식만) */}
+                  {/* 재무제표 */}
                   {stockDetail.financials?.available && (
                     <div className="financials-section">
                       <h4>재무 정보</h4>
-                      <div className="financials-grid">
-                        {stockDetail.financials.per && (
-                          <div className="financial-item">
-                            <span className="financial-label">PER</span>
-                            <span className="financial-value">{stockDetail.financials.per.toFixed(2)}</span>
+
+                      {/* 기본 정보 */}
+                      {stockDetail.financials.basic && (
+                        <div className="financials-subsection">
+                          <h5>투자 지표</h5>
+                          <div className="financials-grid">
+                            {stockDetail.financials.basic.trailingPE && (
+                              <div className="financial-item">
+                                <span className="financial-label">PER</span>
+                                <span className="financial-value">{stockDetail.financials.basic.trailingPE}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.basic.forwardPE && (
+                              <div className="financial-item">
+                                <span className="financial-label">Forward PER</span>
+                                <span className="financial-value">{stockDetail.financials.basic.forwardPE}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.basic.priceToBook && (
+                              <div className="financial-item">
+                                <span className="financial-label">PBR</span>
+                                <span className="financial-value">{stockDetail.financials.basic.priceToBook}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.basic.dividendYield && (
+                              <div className="financial-item">
+                                <span className="financial-label">배당수익률</span>
+                                <span className="financial-value">{stockDetail.financials.basic.dividendYield}%</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.basic.marketCapFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">시가총액</span>
+                                <span className="financial-value">{stockDetail.financials.basic.marketCapFormatted}</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {stockDetail.financials.pbr && (
-                          <div className="financial-item">
-                            <span className="financial-label">PBR</span>
-                            <span className="financial-value">{stockDetail.financials.pbr.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {/* 손익계산서 */}
+                      {stockDetail.financials.incomeStatement && (
+                        <div className="financials-subsection">
+                          <h5>손익계산서</h5>
+                          <div className="financials-grid">
+                            {stockDetail.financials.incomeStatement.totalRevenueFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">매출액</span>
+                                <span className="financial-value">{stockDetail.financials.incomeStatement.totalRevenueFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.incomeStatement.grossProfitFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">매출총이익</span>
+                                <span className="financial-value">{stockDetail.financials.incomeStatement.grossProfitFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.incomeStatement.operatingIncomeFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">영업이익</span>
+                                <span className="financial-value">{stockDetail.financials.incomeStatement.operatingIncomeFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.incomeStatement.netIncomeFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">순이익</span>
+                                <span className="financial-value">{stockDetail.financials.incomeStatement.netIncomeFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.incomeStatement.ebitdaFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">EBITDA</span>
+                                <span className="financial-value">{stockDetail.financials.incomeStatement.ebitdaFormatted}</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {stockDetail.financials.eps && (
-                          <div className="financial-item">
-                            <span className="financial-label">EPS</span>
-                            <span className="financial-value">${stockDetail.financials.eps.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {/* 대차대조표 */}
+                      {stockDetail.financials.balanceSheet && (
+                        <div className="financials-subsection">
+                          <h5>대차대조표</h5>
+                          <div className="financials-grid">
+                            {stockDetail.financials.balanceSheet.totalAssetsFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">총자산</span>
+                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalAssetsFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.balanceSheet.totalLiabilitiesFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">총부채</span>
+                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalLiabilitiesFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.balanceSheet.totalEquityFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">자기자본</span>
+                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalEquityFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.balanceSheet.cashFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">현금</span>
+                                <span className="financial-value">{stockDetail.financials.balanceSheet.cashFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.balanceSheet.totalDebtFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">총부채</span>
+                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalDebtFormatted}</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {stockDetail.financials.roe && (
-                          <div className="financial-item">
-                            <span className="financial-label">ROE</span>
-                            <span className="financial-value">{formatPercent(stockDetail.financials.roe)}</span>
+                        </div>
+                      )}
+
+                      {/* 현금흐름표 */}
+                      {stockDetail.financials.cashFlow && (
+                        <div className="financials-subsection">
+                          <h5>현금흐름표</h5>
+                          <div className="financials-grid">
+                            {stockDetail.financials.cashFlow.operatingCashFlowFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">영업활동</span>
+                                <span className="financial-value">{stockDetail.financials.cashFlow.operatingCashFlowFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.cashFlow.investingCashFlowFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">투자활동</span>
+                                <span className="financial-value">{stockDetail.financials.cashFlow.investingCashFlowFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.cashFlow.financingCashFlowFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">재무활동</span>
+                                <span className="financial-value">{stockDetail.financials.cashFlow.financingCashFlowFormatted}</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.cashFlow.freeCashFlowFormatted && (
+                              <div className="financial-item">
+                                <span className="financial-label">잉여현금흐름</span>
+                                <span className="financial-value">{stockDetail.financials.cashFlow.freeCashFlowFormatted}</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {stockDetail.financials.profit_margin && (
-                          <div className="financial-item">
-                            <span className="financial-label">이익률</span>
-                            <span className="financial-value">{formatPercent(stockDetail.financials.profit_margin)}</span>
+                        </div>
+                      )}
+
+                      {/* 수익성 지표 */}
+                      {stockDetail.financials.profitability && (
+                        <div className="financials-subsection">
+                          <h5>수익성 지표</h5>
+                          <div className="financials-grid">
+                            {stockDetail.financials.profitability.grossMargin && (
+                              <div className="financial-item">
+                                <span className="financial-label">매출총이익률</span>
+                                <span className="financial-value">{stockDetail.financials.profitability.grossMargin}%</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.profitability.operatingMargin && (
+                              <div className="financial-item">
+                                <span className="financial-label">영업이익률</span>
+                                <span className="financial-value">{stockDetail.financials.profitability.operatingMargin}%</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.profitability.profitMargin && (
+                              <div className="financial-item">
+                                <span className="financial-label">순이익률</span>
+                                <span className="financial-value">{stockDetail.financials.profitability.profitMargin}%</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.profitability.returnOnAssets && (
+                              <div className="financial-item">
+                                <span className="financial-label">ROA</span>
+                                <span className="financial-value">{stockDetail.financials.profitability.returnOnAssets}%</span>
+                              </div>
+                            )}
+                            {stockDetail.financials.profitability.returnOnEquity && (
+                              <div className="financial-item">
+                                <span className="financial-label">ROE</span>
+                                <span className="financial-value">{stockDetail.financials.profitability.returnOnEquity}%</span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {stockDetail.financials.dividend_yield && (
-                          <div className="financial-item">
-                            <span className="financial-label">배당수익률</span>
-                            <span className="financial-value">{formatPercent(stockDetail.financials.dividend_yield)}</span>
-                          </div>
-                        )}
-                        {stockDetail.financials.debt_to_equity && (
-                          <div className="financial-item">
-                            <span className="financial-label">부채비율</span>
-                            <span className="financial-value">{stockDetail.financials.debt_to_equity.toFixed(1)}%</span>
-                          </div>
-                        )}
-                        {stockDetail.financials.revenue && (
-                          <div className="financial-item">
-                            <span className="financial-label">매출</span>
-                            <span className="financial-value">{formatNumber(stockDetail.financials.revenue)}</span>
-                          </div>
-                        )}
-                        {stockDetail.financials.profit && (
-                          <div className="financial-item">
-                            <span className="financial-label">순이익</span>
-                            <span className="financial-value">{formatNumber(stockDetail.financials.profit)}</span>
-                          </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
+
+                      {/* 기존 형식 지원 (미국 주식) */}
+                      {!stockDetail.financials.basic && (
+                        <div className="financials-grid">
+                          {stockDetail.financials.per && (
+                            <div className="financial-item">
+                              <span className="financial-label">PER</span>
+                              <span className="financial-value">{stockDetail.financials.per.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.pbr && (
+                            <div className="financial-item">
+                              <span className="financial-label">PBR</span>
+                              <span className="financial-value">{stockDetail.financials.pbr.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.eps && (
+                            <div className="financial-item">
+                              <span className="financial-label">EPS</span>
+                              <span className="financial-value">${stockDetail.financials.eps.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.roe && (
+                            <div className="financial-item">
+                              <span className="financial-label">ROE</span>
+                              <span className="financial-value">{formatPercent(stockDetail.financials.roe)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.profit_margin && (
+                            <div className="financial-item">
+                              <span className="financial-label">이익률</span>
+                              <span className="financial-value">{formatPercent(stockDetail.financials.profit_margin)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.dividend_yield && (
+                            <div className="financial-item">
+                              <span className="financial-label">배당수익률</span>
+                              <span className="financial-value">{formatPercent(stockDetail.financials.dividend_yield)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.debt_to_equity && (
+                            <div className="financial-item">
+                              <span className="financial-label">부채비율</span>
+                              <span className="financial-value">{stockDetail.financials.debt_to_equity.toFixed(1)}%</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.revenue && (
+                            <div className="financial-item">
+                              <span className="financial-label">매출</span>
+                              <span className="financial-value">{formatNumber(stockDetail.financials.revenue)}</span>
+                            </div>
+                          )}
+                          {stockDetail.financials.profit && (
+                            <div className="financial-item">
+                              <span className="financial-label">순이익</span>
+                              <span className="financial-value">{formatNumber(stockDetail.financials.profit)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {stockDetail.financials.sector && (
                         <div className="company-info">
                           <p><strong>섹터:</strong> {stockDetail.financials.sector}</p>

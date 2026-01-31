@@ -965,13 +965,126 @@ class StockDataService:
             return {"error": str(e)}
 
     def _get_kr_financials(self, symbol: str) -> Dict:
-        """한국 주식 재무제표 (기본 정보만)"""
-        # FinanceDataReader는 재무제표를 직접 제공하지 않음
-        # 기본 정보만 반환
-        return {
-            "available": False,
-            "message": "한국 주식 재무제표는 현재 지원되지 않습니다."
-        }
+        """한국 주식 재무제표 (yfinance 사용)"""
+        try:
+            # 한국 주식은 .KS (KOSPI) 또는 .KQ (KOSDAQ) 접미사 사용
+            # 먼저 KOSPI로 시도
+            ticker_symbol = f"{symbol}.KS"
+            ticker = yf.Ticker(ticker_symbol)
+
+            # 기본 정보 확인
+            info = ticker.info
+            if not info or info.get('regularMarketPrice') is None:
+                # KOSDAQ으로 재시도
+                ticker_symbol = f"{symbol}.KQ"
+                ticker = yf.Ticker(ticker_symbol)
+                info = ticker.info
+
+            if not info or info.get('regularMarketPrice') is None:
+                return {
+                    "available": False,
+                    "message": "재무제표를 찾을 수 없습니다."
+                }
+
+            # 손익계산서
+            income_stmt = ticker.financials
+            # 대차대조표
+            balance_sheet = ticker.balance_sheet
+            # 현금흐름표
+            cashflow = ticker.cashflow
+
+            def safe_get(df, key, default=None):
+                """DataFrame에서 안전하게 값 가져오기"""
+                try:
+                    if df is None or df.empty:
+                        return default
+                    if key in df.index:
+                        val = df.loc[key].iloc[0]
+                        if pd.notna(val):
+                            return int(val) if abs(val) > 1 else round(float(val), 4)
+                    return default
+                except:
+                    return default
+
+            def format_number(val):
+                """숫자를 읽기 쉬운 형태로 변환 (억원 단위)"""
+                if val is None:
+                    return None
+                if abs(val) >= 100000000:  # 1억 이상
+                    return f"{val / 100000000:.1f}억"
+                elif abs(val) >= 10000:  # 1만 이상
+                    return f"{val / 10000:.1f}만"
+                return str(int(val))
+
+            # 주요 재무 지표 추출
+            financials_data = {
+                "available": True,
+                "currency": "KRW",
+                # 기본 정보
+                "basic": {
+                    "marketCap": info.get('marketCap'),
+                    "marketCapFormatted": format_number(info.get('marketCap')),
+                    "enterpriseValue": info.get('enterpriseValue'),
+                    "trailingPE": round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else None,
+                    "forwardPE": round(info.get('forwardPE', 0), 2) if info.get('forwardPE') else None,
+                    "priceToBook": round(info.get('priceToBook', 0), 2) if info.get('priceToBook') else None,
+                    "dividendYield": round(info.get('dividendYield', 0) * 100, 2) if info.get('dividendYield') else None,
+                },
+                # 손익계산서
+                "incomeStatement": {
+                    "totalRevenue": safe_get(income_stmt, 'Total Revenue'),
+                    "totalRevenueFormatted": format_number(safe_get(income_stmt, 'Total Revenue')),
+                    "grossProfit": safe_get(income_stmt, 'Gross Profit'),
+                    "grossProfitFormatted": format_number(safe_get(income_stmt, 'Gross Profit')),
+                    "operatingIncome": safe_get(income_stmt, 'Operating Income'),
+                    "operatingIncomeFormatted": format_number(safe_get(income_stmt, 'Operating Income')),
+                    "netIncome": safe_get(income_stmt, 'Net Income'),
+                    "netIncomeFormatted": format_number(safe_get(income_stmt, 'Net Income')),
+                    "ebitda": safe_get(income_stmt, 'EBITDA'),
+                    "ebitdaFormatted": format_number(safe_get(income_stmt, 'EBITDA')),
+                },
+                # 대차대조표
+                "balanceSheet": {
+                    "totalAssets": safe_get(balance_sheet, 'Total Assets'),
+                    "totalAssetsFormatted": format_number(safe_get(balance_sheet, 'Total Assets')),
+                    "totalLiabilities": safe_get(balance_sheet, 'Total Liabilities Net Minority Interest'),
+                    "totalLiabilitiesFormatted": format_number(safe_get(balance_sheet, 'Total Liabilities Net Minority Interest')),
+                    "totalEquity": safe_get(balance_sheet, 'Stockholders Equity'),
+                    "totalEquityFormatted": format_number(safe_get(balance_sheet, 'Stockholders Equity')),
+                    "cash": safe_get(balance_sheet, 'Cash And Cash Equivalents'),
+                    "cashFormatted": format_number(safe_get(balance_sheet, 'Cash And Cash Equivalents')),
+                    "totalDebt": safe_get(balance_sheet, 'Total Debt'),
+                    "totalDebtFormatted": format_number(safe_get(balance_sheet, 'Total Debt')),
+                },
+                # 현금흐름표
+                "cashFlow": {
+                    "operatingCashFlow": safe_get(cashflow, 'Operating Cash Flow'),
+                    "operatingCashFlowFormatted": format_number(safe_get(cashflow, 'Operating Cash Flow')),
+                    "investingCashFlow": safe_get(cashflow, 'Investing Cash Flow'),
+                    "investingCashFlowFormatted": format_number(safe_get(cashflow, 'Investing Cash Flow')),
+                    "financingCashFlow": safe_get(cashflow, 'Financing Cash Flow'),
+                    "financingCashFlowFormatted": format_number(safe_get(cashflow, 'Financing Cash Flow')),
+                    "freeCashFlow": safe_get(cashflow, 'Free Cash Flow'),
+                    "freeCashFlowFormatted": format_number(safe_get(cashflow, 'Free Cash Flow')),
+                },
+                # 수익성 지표
+                "profitability": {
+                    "grossMargin": round(info.get('grossMargins', 0) * 100, 2) if info.get('grossMargins') else None,
+                    "operatingMargin": round(info.get('operatingMargins', 0) * 100, 2) if info.get('operatingMargins') else None,
+                    "profitMargin": round(info.get('profitMargins', 0) * 100, 2) if info.get('profitMargins') else None,
+                    "returnOnAssets": round(info.get('returnOnAssets', 0) * 100, 2) if info.get('returnOnAssets') else None,
+                    "returnOnEquity": round(info.get('returnOnEquity', 0) * 100, 2) if info.get('returnOnEquity') else None,
+                }
+            }
+
+            return financials_data
+
+        except Exception as e:
+            logger.error(f"Failed to get KR financials for {symbol}: {e}")
+            return {
+                "available": False,
+                "message": f"재무제표 조회 실패: {str(e)}"
+            }
 
     def _get_us_stock_detail(self, symbol: str, market: str, period: str = "6mo", interval: str = "1d") -> Dict:
         """미국 주식 상세 정보"""

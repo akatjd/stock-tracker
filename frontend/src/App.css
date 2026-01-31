@@ -4,17 +4,28 @@
   padding: 0;
 }
 
+html, body {
+  width: 100%;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  min-height: 100vh;
   color: #e5e5e5;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
 }
 
 .app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .header {
@@ -23,6 +34,7 @@ body {
   padding: 2rem;
   text-align: center;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
 }
 
 .header h1 {
@@ -41,6 +53,7 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+  box-sizing: border-box;
 }
 
 .controls {
@@ -979,6 +992,7 @@ tr.oversold-row .rsi-badge {
   padding: 1.5rem;
   text-align: center;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
+  width: 100%;
 }
 
 .footer p {
@@ -1337,11 +1351,29 @@ tr.oversold-row .rsi-badge {
   font-size: 1rem;
 }
 
+.financials-subsection {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.financials-subsection:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.financials-subsection h5 {
+  color: #667eea;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  font-weight: 500;
+}
+
 .financials-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
 }
 
 .financial-item {
