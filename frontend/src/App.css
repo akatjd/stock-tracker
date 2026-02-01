@@ -31,20 +31,131 @@ body {
 .header {
   background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(10px);
-  padding: 2rem;
-  text-align: center;
+  padding: 1.5rem 2rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   width: 100%;
 }
 
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.header-title {
+  text-align: left;
+}
+
 .header h1 {
-  font-size: 2rem;
+  font-size: 1.75rem;
   color: #fff;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .header p {
   color: #a0a0a0;
+  font-size: 0.9rem;
+}
+
+/* 종목 검색 */
+.stock-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.search-inputs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.search-market-select {
+  padding: 0.6rem 0.8rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.search-market-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.search-input {
+  padding: 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+  width: 180px;
+}
+
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.search-button {
+  padding: 0.6rem 1.2rem;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.search-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  transform: translateY(-1px);
+}
+
+.search-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.search-error {
+  color: #ef4444;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+/* 반응형 헤더 */
+@media (max-width: 768px) {
+  .header-top {
+    flex-direction: column;
+    text-align: center;
+    gap: 1rem;
+  }
+
+  .header-title {
+    text-align: center;
+  }
+
+  .search-inputs {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .search-input {
+    width: 150px;
+  }
 }
 
 .main {

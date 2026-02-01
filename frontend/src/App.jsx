@@ -65,6 +65,12 @@ function App() {
   const [isValidating, setIsValidating] = useState(false)
   const [validationMessage, setValidationMessage] = useState(null)  // { type: 'error' | 'success', text: string }
 
+  // 종목 직접 검색 상태
+  const [directSearchSymbol, setDirectSearchSymbol] = useState('')
+  const [directSearchMarket, setDirectSearchMarket] = useState('KOSPI')
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState(null)
+
   // 미리보기 함수
   const fetchPreview = async (page = 1, search = '') => {
     setIsLoadingPreview(true)
@@ -246,6 +252,54 @@ function App() {
     // 초기값으로 리셋
     setChartPeriod('6mo')
     setChartInterval('1d')
+  }
+
+  // 종목 직접 검색
+  const handleDirectSearch = async () => {
+    if (!directSearchSymbol.trim()) {
+      setSearchError('종목 코드를 입력해주세요.')
+      return
+    }
+
+    const symbol = directSearchSymbol.trim().toUpperCase()
+    setIsSearching(true)
+    setSearchError(null)
+
+    try {
+      // 먼저 종목 유효성 검사
+      const validateResponse = await fetch(
+        `http://localhost:8001/api/v1/stock/validate?symbol=${encodeURIComponent(symbol)}&market=${directSearchMarket}`
+      )
+      const validateData = await validateResponse.json()
+
+      if (!validateData.valid) {
+        setSearchError(validateData.message || '유효하지 않은 종목입니다.')
+        setIsSearching(false)
+        return
+      }
+
+      // 유효한 종목이면 상세 정보 조회
+      const stock = {
+        symbol: symbol,
+        name: validateData.name || symbol,
+        market: directSearchMarket
+      }
+
+      setDirectSearchSymbol('')
+      setSearchError(null)
+      fetchStockDetail(stock)
+    } catch (err) {
+      setSearchError('종목 검색에 실패했습니다: ' + err.message)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  // Enter 키로 검색
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleDirectSearch()
+    }
   }
 
   // 숫자 포맷팅 (억/조 단위)
@@ -525,8 +579,45 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>RSI 과매도 스캐너</h1>
-        <p>일봉/주봉/월봉 RSI가 30 이하인 종목을 찾아보세요</p>
+        <div className="header-top">
+          <div className="header-title">
+            <h1>RSI 과매도 스캐너</h1>
+            <p>일봉/주봉/월봉 RSI가 30 이하인 종목을 찾아보세요</p>
+          </div>
+          <div className="stock-search">
+            <div className="search-inputs">
+              <select
+                value={directSearchMarket}
+                onChange={(e) => setDirectSearchMarket(e.target.value)}
+                className="search-market-select"
+              >
+                <optgroup label="한국">
+                  <option value="KOSPI">KOSPI</option>
+                  <option value="KOSDAQ">KOSDAQ</option>
+                </optgroup>
+                <optgroup label="미국">
+                  <option value="NASDAQ">NASDAQ</option>
+                </optgroup>
+              </select>
+              <input
+                type="text"
+                value={directSearchSymbol}
+                onChange={(e) => setDirectSearchSymbol(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="종목코드 (예: 005930, AAPL)"
+                className="search-input"
+              />
+              <button
+                onClick={handleDirectSearch}
+                disabled={isSearching}
+                className="search-button"
+              >
+                {isSearching ? '검색중...' : '검색'}
+              </button>
+            </div>
+            {searchError && <div className="search-error">{searchError}</div>}
+          </div>
+        </div>
       </header>
 
       <main className="main">
