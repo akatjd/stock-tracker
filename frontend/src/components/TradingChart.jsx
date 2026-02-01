@@ -215,14 +215,23 @@ const TradingChart = ({
         width: containerWidth,
         height: isFullscreen ? fullscreenHeight : height,
       })
+      // 데이터가 전체 너비에 맞게 표시되도록 fitContent 호출
+      chartRef.current.timeScale().fitContent()
     }
 
     // 즉시 한 번 실행
     resizeChart()
 
-    // CSS 애니메이션/전환 후 다시 실행
-    const timer = setTimeout(resizeChart, 50)
-    return () => clearTimeout(timer)
+    // CSS 전환 완료 후 여러 번 리사이즈 (DOM 업데이트 타이밍 보장)
+    const timer1 = setTimeout(resizeChart, 0)
+    const timer2 = setTimeout(resizeChart, 100)
+    const timer3 = setTimeout(resizeChart, 200)
+
+    return () => {
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+      clearTimeout(timer3)
+    }
   }, [isFullscreen, fullscreenHeight, height])
 
   // 데이터 업데이트 (차트 재생성 없이 시리즈만 업데이트)
@@ -660,6 +669,8 @@ const TradingChart = ({
   }
 
   const handleCanvasMouseUp = (e) => {
+    // 오른쪽 클릭은 무시 (contextmenu에서 처리)
+    if (e.button !== 0) return
     if (!isDrawing || !currentLine) return
 
     e.preventDefault()
@@ -701,18 +712,27 @@ const TradingChart = ({
       let endX = line.endX
       let endY = line.endY
 
-      if (line.startTime !== undefined && line.startPrice !== undefined) {
-        const startCoords = chartToPixelCoords(line.startTime, line.startPrice)
-        if (startCoords) {
-          startX = startCoords.x
-          startY = startCoords.y
+      // 수평선은 가격만으로 Y 좌표 계산 (시간과 무관)
+      if (line.mode === 'horizontal' && line.startPrice !== undefined && candleSeriesRef.current) {
+        const priceY = candleSeriesRef.current.priceToCoordinate(line.startPrice)
+        if (priceY !== null) {
+          startY = priceY
         }
-      }
-      if (line.endTime !== undefined && line.endPrice !== undefined) {
-        const endCoords = chartToPixelCoords(line.endTime, line.endPrice)
-        if (endCoords) {
-          endX = endCoords.x
-          endY = endCoords.y
+      } else {
+        // 일반 선/반직선은 시간+가격으로 좌표 계산
+        if (line.startTime !== undefined && line.startPrice !== undefined) {
+          const startCoords = chartToPixelCoords(line.startTime, line.startPrice)
+          if (startCoords) {
+            startX = startCoords.x
+            startY = startCoords.y
+          }
+        }
+        if (line.endTime !== undefined && line.endPrice !== undefined) {
+          const endCoords = chartToPixelCoords(line.endTime, line.endPrice)
+          if (endCoords) {
+            endX = endCoords.x
+            endY = endCoords.y
+          }
         }
       }
 
@@ -907,26 +927,24 @@ const TradingChart = ({
         >
           {isFullscreen ? '🗗 축소' : '🔍 확대'}
         </button>
-        {drawMode && <span className="draw-hint">차트 위에서 드래그하여 그리기</span>}
-      </div>
 
-      {/* 기간/봉 타입 선택 (전체화면에서만 표시) */}
-      {isFullscreen && onPeriodChange && onIntervalChange && (
-        <div className="fullscreen-controls">
-          <div className="control-group">
-            <span className="control-label">기간</span>
-            <div className="control-buttons">
+        {/* 기간/봉 타입 선택 (전체화면에서만 표시) */}
+        {isFullscreen && onPeriodChange && onIntervalChange && (
+          <>
+            <span className="toolbar-divider"></span>
+            <div className="toolbar-group">
+              <span className="toolbar-label">기간:</span>
               {[
-                { value: '1mo', label: '1개월' },
-                { value: '3mo', label: '3개월' },
-                { value: '6mo', label: '6개월' },
-                { value: '1y', label: '1년' },
-                { value: '2y', label: '2년' },
-                { value: '5y', label: '5년' }
+                { value: '1mo', label: '1M' },
+                { value: '3mo', label: '3M' },
+                { value: '6mo', label: '6M' },
+                { value: '1y', label: '1Y' },
+                { value: '2y', label: '2Y' },
+                { value: '5y', label: '5Y' }
               ].map(p => (
                 <button
                   key={p.value}
-                  className={`control-btn ${period === p.value ? 'active' : ''}`}
+                  className={`draw-btn small ${period === p.value ? 'active' : ''}`}
                   onClick={() => onPeriodChange(p.value)}
                   disabled={isLoading}
                 >
@@ -934,20 +952,17 @@ const TradingChart = ({
                 </button>
               ))}
             </div>
-          </div>
-          <div className="control-group">
-            <span className="control-label">봉 타입</span>
-            <div className="control-buttons">
+            <div className="toolbar-group">
+              <span className="toolbar-label">봉:</span>
               {[
-                { value: '1h', label: '1시간' },
-                { value: '4h', label: '4시간' },
-                { value: '1d', label: '일봉' },
-                { value: '1wk', label: '주봉' },
-                { value: '1mo', label: '월봉' }
+                { value: '1h', label: '1H' },
+                { value: '1d', label: '1D' },
+                { value: '1wk', label: '1W' },
+                { value: '1mo', label: '1Mo' }
               ].map(i => (
                 <button
                   key={i.value}
-                  className={`control-btn ${interval === i.value ? 'active' : ''}`}
+                  className={`draw-btn small ${interval === i.value ? 'active' : ''}`}
                   onClick={() => onIntervalChange(i.value)}
                   disabled={isLoading}
                 >
@@ -955,10 +970,12 @@ const TradingChart = ({
                 </button>
               ))}
             </div>
-          </div>
-          {isLoading && <span className="loading-hint">로딩중...</span>}
-        </div>
-      )}
+            {isLoading && <span className="loading-hint">로딩...</span>}
+          </>
+        )}
+
+        {drawMode && <span className="draw-hint">차트 위에서 드래그하여 그리기</span>}
+      </div>
 
       {/* 차트 컨테이너 */}
       <div className="chart-wrapper" style={{ position: 'relative' }}>

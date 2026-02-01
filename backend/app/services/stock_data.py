@@ -1065,7 +1065,19 @@ class StockDataService:
                 'Free Cash Flow': 'freeCashFlow'
             }
 
-            # 주요 재무 지표 추출
+            # 배당수익률 처리 (yfinance 값이 불일치할 수 있음)
+            # yfinance는 dividendYield를 퍼센트로 반환하기도 하고 (0.4 = 0.4%)
+            # 소수로 반환하기도 함 (0.004 = 0.4%)
+            div_yield = info.get('dividendYield', 0)
+            if div_yield:
+                # 100을 곱했을 때 20%를 초과하면 이미 퍼센트 형태로 간주
+                if div_yield * 100 > 20:
+                    div_yield_pct = round(div_yield, 2)
+                else:
+                    div_yield_pct = round(div_yield * 100, 2)
+            else:
+                div_yield_pct = None
+
             financials_data = {
                 "available": True,
                 "currency": "KRW",
@@ -1077,7 +1089,7 @@ class StockDataService:
                     "trailingPE": round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else None,
                     "forwardPE": round(info.get('forwardPE', 0), 2) if info.get('forwardPE') else None,
                     "priceToBook": round(info.get('priceToBook', 0), 2) if info.get('priceToBook') else None,
-                    "dividendYield": round(info.get('dividendYield', 0) * 100, 2) if info.get('dividendYield') else None,
+                    "dividendYield": div_yield_pct,
                 },
                 # 5개년 손익계산서
                 "incomeStatementYearly": get_yearly_data(income_stmt, income_keys),
@@ -1239,15 +1251,15 @@ class StockDataService:
                 },
                 "support_resistance": support_resistance,
                 "chart_data": chart_data,
-                "financials": self._get_us_financials(info)
+                "financials": self._get_us_financials(ticker, info)
             }
 
         except Exception as e:
             logger.error(f"Failed to get US stock detail: {e}")
             return {"error": str(e)}
 
-    def _get_us_financials(self, info: Dict) -> Dict:
-        """미국 주식 재무제표 정보"""
+    def _get_us_financials(self, ticker, info: Dict) -> Dict:
+        """미국 주식 재무제표 정보 - 5개년 데이터"""
         try:
             # 기업 소개 번역
             description_en = info.get('longBusinessSummary', '')
@@ -1256,21 +1268,131 @@ class StockDataService:
                 # 500자로 제한 후 번역
                 description_kr = translate_to_korean(description_en[:500])
 
+            # 손익계산서
+            income_stmt = ticker.financials
+            # 대차대조표
+            balance_sheet = ticker.balance_sheet
+            # 현금흐름표
+            cashflow = ticker.cashflow
+
+            def format_number_usd(val):
+                """숫자를 읽기 쉬운 형태로 변환 (USD - B/M 단위)"""
+                if val is None:
+                    return None
+                try:
+                    val = float(val)
+                    if abs(val) >= 1000000000:  # 10억 이상 (Billion)
+                        return f"${val / 1000000000:.1f}B"
+                    elif abs(val) >= 1000000:  # 100만 이상 (Million)
+                        return f"${val / 1000000:.1f}M"
+                    elif abs(val) >= 1000:  # 1000 이상 (Thousand)
+                        return f"${val / 1000:.1f}K"
+                    return f"${int(val)}"
+                except:
+                    return None
+
+            def get_yearly_data(df, keys):
+                """DataFrame에서 연도별 데이터 추출"""
+                if df is None or df.empty:
+                    return []
+
+                yearly_data = []
+                # 컬럼은 날짜 (최근 연도부터)
+                for col in df.columns[:5]:  # 최대 5개년
+                    year = col.strftime('%Y') if hasattr(col, 'strftime') else str(col)[:4]
+                    year_data = {"year": year}
+
+                    for key, display_name in keys.items():
+                        try:
+                            if key in df.index:
+                                val = df.loc[key, col]
+                                if pd.notna(val):
+                                    year_data[display_name] = int(val) if abs(val) > 1 else round(float(val), 4)
+                                    year_data[f"{display_name}Formatted"] = format_number_usd(val)
+                                else:
+                                    year_data[display_name] = None
+                                    year_data[f"{display_name}Formatted"] = None
+                            else:
+                                year_data[display_name] = None
+                                year_data[f"{display_name}Formatted"] = None
+                        except:
+                            year_data[display_name] = None
+                            year_data[f"{display_name}Formatted"] = None
+
+                    yearly_data.append(year_data)
+
+                return yearly_data
+
+            # 손익계산서 키 매핑
+            income_keys = {
+                'Total Revenue': 'totalRevenue',
+                'Gross Profit': 'grossProfit',
+                'Operating Income': 'operatingIncome',
+                'Net Income': 'netIncome',
+                'EBITDA': 'ebitda'
+            }
+
+            # 대차대조표 키 매핑
+            balance_keys = {
+                'Total Assets': 'totalAssets',
+                'Total Liabilities Net Minority Interest': 'totalLiabilities',
+                'Stockholders Equity': 'totalEquity',
+                'Cash And Cash Equivalents': 'cash',
+                'Total Debt': 'totalDebt'
+            }
+
+            # 현금흐름표 키 매핑
+            cashflow_keys = {
+                'Operating Cash Flow': 'operatingCashFlow',
+                'Investing Cash Flow': 'investingCashFlow',
+                'Financing Cash Flow': 'financingCashFlow',
+                'Free Cash Flow': 'freeCashFlow'
+            }
+
+            # 배당수익률 처리 (yfinance 값이 불일치할 수 있음)
+            # yfinance는 dividendYield를 퍼센트로 반환하기도 하고 (0.4 = 0.4%)
+            # 소수로 반환하기도 함 (0.004 = 0.4%)
+            div_yield = info.get('dividendYield', 0)
+            if div_yield:
+                # 100을 곱했을 때 20%를 초과하면 이미 퍼센트 형태로 간주
+                if div_yield * 100 > 20:
+                    div_yield_pct = round(div_yield, 2)
+                else:
+                    div_yield_pct = round(div_yield * 100, 2)
+            else:
+                div_yield_pct = None
+
             return {
                 "available": True,
-                "per": info.get('trailingPE'),  # PER
-                "pbr": info.get('priceToBook'),  # PBR
-                "eps": info.get('trailingEps'),  # EPS
-                "roe": info.get('returnOnEquity'),  # ROE (소수점)
-                "revenue": info.get('totalRevenue'),  # 매출
-                "profit": info.get('netIncomeToCommon'),  # 순이익
-                "dividend_yield": info.get('dividendYield'),  # 배당수익률
-                "debt_to_equity": info.get('debtToEquity'),  # 부채비율
-                "current_ratio": info.get('currentRatio'),  # 유동비율
-                "profit_margin": info.get('profitMargins'),  # 이익률
+                "currency": "USD",
+                # 기본 정보
+                "basic": {
+                    "marketCap": info.get('marketCap'),
+                    "marketCapFormatted": format_number_usd(info.get('marketCap')),
+                    "enterpriseValue": info.get('enterpriseValue'),
+                    "trailingPE": round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else None,
+                    "forwardPE": round(info.get('forwardPE', 0), 2) if info.get('forwardPE') else None,
+                    "priceToBook": round(info.get('priceToBook', 0), 2) if info.get('priceToBook') else None,
+                    "dividendYield": div_yield_pct,
+                },
+                # 5개년 손익계산서
+                "incomeStatementYearly": get_yearly_data(income_stmt, income_keys),
+                # 5개년 대차대조표
+                "balanceSheetYearly": get_yearly_data(balance_sheet, balance_keys),
+                # 5개년 현금흐름표
+                "cashFlowYearly": get_yearly_data(cashflow, cashflow_keys),
+                # 수익성 지표 (현재)
+                "profitability": {
+                    "grossMargin": round(info.get('grossMargins', 0) * 100, 2) if info.get('grossMargins') else None,
+                    "operatingMargin": round(info.get('operatingMargins', 0) * 100, 2) if info.get('operatingMargins') else None,
+                    "profitMargin": round(info.get('profitMargins', 0) * 100, 2) if info.get('profitMargins') else None,
+                    "returnOnAssets": round(info.get('returnOnAssets', 0) * 100, 2) if info.get('returnOnAssets') else None,
+                    "returnOnEquity": round(info.get('returnOnEquity', 0) * 100, 2) if info.get('returnOnEquity') else None,
+                },
+                # 기존 정보도 유지
                 "sector": info.get('sector'),
                 "industry": info.get('industry'),
-                "description": description_kr  # 한국어로 번역된 기업 설명
+                "description": description_kr
             }
         except Exception as e:
             logger.error(f"Failed to get US financials: {e}")

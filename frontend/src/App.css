@@ -1704,69 +1704,34 @@ tr.oversold-row .rsi-badge {
   box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
 }
 
-/* 전체화면 차트 컨트롤 */
-.fullscreen-controls {
-  position: absolute;
-  top: 50px;
-  left: 10px;
-  z-index: 1001;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: rgba(26, 26, 46, 0.95);
-  padding: 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
+/* 툴바 인라인 컨트롤 */
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 0.5rem;
 }
 
-.fullscreen-controls .control-group {
+.toolbar-group {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 0.25rem;
 }
 
-.fullscreen-controls .control-label {
-  font-size: 11px;
+.toolbar-label {
+  font-size: 0.7rem;
   color: #a0a0a0;
-  font-weight: 500;
+  margin-right: 0.25rem;
 }
 
-.fullscreen-controls .control-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.draw-btn.small {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.65rem;
+  min-width: auto;
 }
 
-.fullscreen-controls .control-btn {
-  padding: 5px 10px;
-  font-size: 11px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  color: #a0a0a0;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.fullscreen-controls .control-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-}
-
-.fullscreen-controls .control-btn.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
-  border-color: #667eea;
-}
-
-.fullscreen-controls .control-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.fullscreen-controls .loading-hint {
-  font-size: 10px;
+.loading-hint {
+  font-size: 0.7rem;
   color: #667eea;
-  text-align: center;
+  margin-left: 0.5rem;
 }
