@@ -1398,6 +1398,141 @@ class StockDataService:
             logger.error(f"Failed to get US financials: {e}")
             return {"available": False, "message": str(e)}
 
+    def search_stocks(self, query: str, limit: int = 10) -> List[Dict]:
+        """
+        종목 검색 (한글명, 영문명, 심볼로 검색)
+
+        Args:
+            query: 검색어
+            limit: 최대 결과 수
+
+        Returns:
+            검색 결과 리스트 [{symbol, name, market}, ...]
+        """
+        if not query or len(query) < 1:
+            return []
+
+        query_upper = query.upper()
+        query_lower = query.lower()
+        results = []
+
+        try:
+            # 한국 주식 검색 (KOSPI)
+            kospi_stocks = self.get_kospi_symbols_detailed()
+            for stock in kospi_stocks:
+                code = stock.get('code', '')
+                name = stock.get('name', '')
+                # 코드나 이름에 검색어가 포함되면 추가
+                if query in code or query in name or query_lower in name.lower():
+                    results.append({
+                        'symbol': code,
+                        'name': name,
+                        'market': 'KOSPI'
+                    })
+
+            # 한국 주식 검색 (KOSDAQ)
+            kosdaq_stocks = self.get_kosdaq_symbols_detailed()
+            for stock in kosdaq_stocks:
+                code = stock.get('code', '')
+                name = stock.get('name', '')
+                if query in code or query in name or query_lower in name.lower():
+                    results.append({
+                        'symbol': code,
+                        'name': name,
+                        'market': 'KOSDAQ'
+                    })
+
+            # 미국 주식 검색 (NASDAQ)
+            nasdaq_symbols = self.get_nasdaq_symbols()
+            for symbol in nasdaq_symbols:
+                if query_upper in symbol:
+                    # 심볼이 매칭되면 추가 (이름은 나중에 가져옴)
+                    results.append({
+                        'symbol': symbol,
+                        'name': symbol,  # 일단 심볼을 이름으로
+                        'market': 'NASDAQ'
+                    })
+
+            # 미국 주식 영문명 검색을 위한 일부 인기 종목 매핑
+            us_stock_names = {
+                'AAPL': 'Apple Inc.',
+                'MSFT': 'Microsoft Corporation',
+                'GOOGL': 'Alphabet Inc.',
+                'GOOG': 'Alphabet Inc.',
+                'AMZN': 'Amazon.com Inc.',
+                'META': 'Meta Platforms Inc.',
+                'TSLA': 'Tesla Inc.',
+                'NVDA': 'NVIDIA Corporation',
+                'NFLX': 'Netflix Inc.',
+                'AMD': 'Advanced Micro Devices',
+                'INTC': 'Intel Corporation',
+                'CSCO': 'Cisco Systems',
+                'ADBE': 'Adobe Inc.',
+                'PYPL': 'PayPal Holdings',
+                'CRM': 'Salesforce Inc.',
+                'ORCL': 'Oracle Corporation',
+                'IBM': 'IBM Corporation',
+                'QCOM': 'Qualcomm Inc.',
+                'TXN': 'Texas Instruments',
+                'AVGO': 'Broadcom Inc.',
+                'COST': 'Costco Wholesale',
+                'PEP': 'PepsiCo Inc.',
+                'KO': 'Coca-Cola Company',
+                'WMT': 'Walmart Inc.',
+                'DIS': 'Walt Disney Company',
+                'V': 'Visa Inc.',
+                'MA': 'Mastercard Inc.',
+                'JPM': 'JPMorgan Chase',
+                'BAC': 'Bank of America',
+                'GS': 'Goldman Sachs',
+                'MS': 'Morgan Stanley',
+                'UBER': 'Uber Technologies',
+                'LYFT': 'Lyft Inc.',
+                'ABNB': 'Airbnb Inc.',
+                'SQ': 'Block Inc.',
+                'SHOP': 'Shopify Inc.',
+                'SPOT': 'Spotify Technology',
+                'ZM': 'Zoom Video',
+                'COIN': 'Coinbase Global',
+            }
+
+            # 영문 이름으로 검색
+            for symbol, name in us_stock_names.items():
+                if query_lower in name.lower() or query_upper in symbol:
+                    # 이미 결과에 있는지 확인
+                    exists = any(r['symbol'] == symbol for r in results)
+                    if not exists:
+                        results.append({
+                            'symbol': symbol,
+                            'name': name,
+                            'market': 'NASDAQ'
+                        })
+                    else:
+                        # 이름 업데이트
+                        for r in results:
+                            if r['symbol'] == symbol:
+                                r['name'] = name
+                                break
+
+            # 정확히 일치하는 것을 앞으로
+            def sort_key(item):
+                symbol = item['symbol']
+                name = item['name']
+                # 정확히 일치하면 0, 시작하면 1, 포함하면 2
+                if symbol == query_upper or name == query:
+                    return 0
+                if symbol.startswith(query_upper) or name.startswith(query):
+                    return 1
+                return 2
+
+            results.sort(key=sort_key)
+
+            return results[:limit]
+
+        except Exception as e:
+            logger.error(f"Failed to search stocks: {e}")
+            return []
+
 
 # 싱글톤 인스턴스
 stock_service = StockDataService()

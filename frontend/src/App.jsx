@@ -71,6 +71,13 @@ function App() {
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState(null)
 
+  // 자동완성 상태
+  const [suggestions, setSuggestions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false)
+  const searchTimeoutRef = useRef(null)
+  const searchInputRef = useRef(null)
+
   // 미리보기 함수
   const fetchPreview = async (page = 1, search = '') => {
     setIsLoadingPreview(true)
@@ -254,12 +261,72 @@ function App() {
     setChartInterval('1d')
   }
 
+  // 자동완성 검색
+  const fetchSuggestions = async (query) => {
+    if (!query || query.length < 1) {
+      setSuggestions([])
+      setShowSuggestions(false)
+      return
+    }
+
+    setIsLoadingSuggestions(true)
+    try {
+      const response = await fetch(
+        `http://localhost:8001/api/v1/stock/search?query=${encodeURIComponent(query)}&limit=10`
+      )
+      const data = await response.json()
+      setSuggestions(data.results || [])
+      setShowSuggestions(true)
+    } catch (err) {
+      console.error('Failed to fetch suggestions:', err)
+      setSuggestions([])
+    } finally {
+      setIsLoadingSuggestions(false)
+    }
+  }
+
+  // 검색어 변경 핸들러 (디바운스 적용)
+  const handleSearchInputChange = (e) => {
+    const value = e.target.value
+    setDirectSearchSymbol(value)
+    setSearchError(null)
+
+    // 기존 타이머 취소
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+
+    // 300ms 후에 자동완성 검색
+    searchTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(value)
+    }, 300)
+  }
+
+  // 자동완성 항목 선택
+  const handleSelectSuggestion = (suggestion) => {
+    setShowSuggestions(false)
+    setSuggestions([])
+    setDirectSearchSymbol('')
+    setSearchError(null)
+
+    const stock = {
+      symbol: suggestion.symbol,
+      name: suggestion.name,
+      market: suggestion.market
+    }
+    fetchStockDetail(stock)
+  }
+
   // 종목 직접 검색
   const handleDirectSearch = async () => {
     if (!directSearchSymbol.trim()) {
       setSearchError('종목 코드를 입력해주세요.')
       return
     }
+
+    // 자동완성 숨기기
+    setShowSuggestions(false)
+    setSuggestions([])
 
     const symbol = directSearchSymbol.trim().toUpperCase()
     setIsSearching(true)
@@ -295,11 +362,25 @@ function App() {
     }
   }
 
-  // Enter 키로 검색
+  // Enter 키로 검색, ESC로 자동완성 닫기
   const handleSearchKeyDown = (e) => {
     if (e.key === 'Enter') {
-      handleDirectSearch()
+      // 자동완성 목록에 항목이 있으면 첫 번째 선택
+      if (showSuggestions && suggestions.length > 0) {
+        handleSelectSuggestion(suggestions[0])
+      } else {
+        handleDirectSearch()
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false)
     }
+  }
+
+  // 검색창 포커스 아웃 시 자동완성 숨기기 (약간의 지연)
+  const handleSearchBlur = () => {
+    setTimeout(() => {
+      setShowSuggestions(false)
+    }, 200)
   }
 
   // 숫자 포맷팅 (억/조 단위)
@@ -586,27 +667,41 @@ function App() {
           </div>
           <div className="stock-search">
             <div className="search-inputs">
-              <select
-                value={directSearchMarket}
-                onChange={(e) => setDirectSearchMarket(e.target.value)}
-                className="search-market-select"
-              >
-                <optgroup label="한국">
-                  <option value="KOSPI">KOSPI</option>
-                  <option value="KOSDAQ">KOSDAQ</option>
-                </optgroup>
-                <optgroup label="미국">
-                  <option value="NASDAQ">NASDAQ</option>
-                </optgroup>
-              </select>
-              <input
-                type="text"
-                value={directSearchSymbol}
-                onChange={(e) => setDirectSearchSymbol(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="종목코드 (예: 005930, AAPL)"
-                className="search-input"
-              />
+              <div className="search-input-wrapper">
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={directSearchSymbol}
+                  onChange={handleSearchInputChange}
+                  onKeyDown={handleSearchKeyDown}
+                  onBlur={handleSearchBlur}
+                  onFocus={() => directSearchSymbol && fetchSuggestions(directSearchSymbol)}
+                  placeholder="종목명/코드 (예: 삼성전자, APPLE, 005930)"
+                  className="search-input"
+                  autoComplete="off"
+                />
+                {/* 자동완성 드롭다운 */}
+                {showSuggestions && suggestions.length > 0 && (
+                  <div className="search-suggestions">
+                    {suggestions.map((suggestion, index) => (
+                      <div
+                        key={`${suggestion.symbol}-${suggestion.market}-${index}`}
+                        className="suggestion-item"
+                        onMouseDown={() => handleSelectSuggestion(suggestion)}
+                      >
+                        <span className="suggestion-symbol">{suggestion.symbol}</span>
+                        <span className="suggestion-name">{suggestion.name}</span>
+                        <span className={`suggestion-market ${suggestion.market.toLowerCase()}`}>
+                          {suggestion.market}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {isLoadingSuggestions && (
+                  <div className="search-loading">검색중...</div>
+                )}
+              </div>
               <button
                 onClick={handleDirectSearch}
                 disabled={isSearching}

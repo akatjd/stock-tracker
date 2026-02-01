@@ -462,6 +462,32 @@ async def get_kr_symbols():
     }
 
 
+@app.get("/api/v1/stock/search")
+async def search_stocks(
+    query: str = Query(..., description="검색어 (종목코드, 종목명)"),
+    limit: int = Query(10, description="최대 결과 수", ge=1, le=50)
+):
+    """
+    종목 검색 API
+
+    한글명, 영문명, 종목코드로 검색 가능
+    예: 삼성전자, APPLE, 005930, AAPL
+    """
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        results = await loop.run_in_executor(
+            executor,
+            lambda: stock_service.search_stocks(query, limit)
+        )
+
+    return {
+        "query": query,
+        "count": len(results),
+        "results": results
+    }
+
+
 @app.get("/api/v1/stock/{symbol}/rsi")
 async def get_stock_rsi(
     symbol: str,
