@@ -965,7 +965,7 @@ class StockDataService:
             return {"error": str(e)}
 
     def _get_kr_financials(self, symbol: str) -> Dict:
-        """한국 주식 재무제표 (yfinance 사용)"""
+        """한국 주식 재무제표 (yfinance 사용) - 5개년 데이터"""
         try:
             # 한국 주식은 .KS (KOSPI) 또는 .KQ (KOSDAQ) 접미사 사용
             # 먼저 KOSPI로 시도
@@ -993,28 +993,77 @@ class StockDataService:
             # 현금흐름표
             cashflow = ticker.cashflow
 
-            def safe_get(df, key, default=None):
-                """DataFrame에서 안전하게 값 가져오기"""
-                try:
-                    if df is None or df.empty:
-                        return default
-                    if key in df.index:
-                        val = df.loc[key].iloc[0]
-                        if pd.notna(val):
-                            return int(val) if abs(val) > 1 else round(float(val), 4)
-                    return default
-                except:
-                    return default
-
             def format_number(val):
                 """숫자를 읽기 쉬운 형태로 변환 (억원 단위)"""
                 if val is None:
                     return None
-                if abs(val) >= 100000000:  # 1억 이상
-                    return f"{val / 100000000:.1f}억"
-                elif abs(val) >= 10000:  # 1만 이상
-                    return f"{val / 10000:.1f}만"
-                return str(int(val))
+                try:
+                    val = float(val)
+                    if abs(val) >= 100000000:  # 1억 이상
+                        return f"{val / 100000000:.1f}억"
+                    elif abs(val) >= 10000:  # 1만 이상
+                        return f"{val / 10000:.1f}만"
+                    return str(int(val))
+                except:
+                    return None
+
+            def get_yearly_data(df, keys):
+                """DataFrame에서 연도별 데이터 추출"""
+                if df is None or df.empty:
+                    return []
+
+                yearly_data = []
+                # 컬럼은 날짜 (최근 연도부터)
+                for col in df.columns[:5]:  # 최대 5개년
+                    year = col.strftime('%Y') if hasattr(col, 'strftime') else str(col)[:4]
+                    year_data = {"year": year}
+
+                    for key, display_name in keys.items():
+                        try:
+                            if key in df.index:
+                                val = df.loc[key, col]
+                                if pd.notna(val):
+                                    year_data[display_name] = int(val) if abs(val) > 1 else round(float(val), 4)
+                                    year_data[f"{display_name}Formatted"] = format_number(val)
+                                else:
+                                    year_data[display_name] = None
+                                    year_data[f"{display_name}Formatted"] = None
+                            else:
+                                year_data[display_name] = None
+                                year_data[f"{display_name}Formatted"] = None
+                        except:
+                            year_data[display_name] = None
+                            year_data[f"{display_name}Formatted"] = None
+
+                    yearly_data.append(year_data)
+
+                return yearly_data
+
+            # 손익계산서 키 매핑
+            income_keys = {
+                'Total Revenue': 'totalRevenue',
+                'Gross Profit': 'grossProfit',
+                'Operating Income': 'operatingIncome',
+                'Net Income': 'netIncome',
+                'EBITDA': 'ebitda'
+            }
+
+            # 대차대조표 키 매핑
+            balance_keys = {
+                'Total Assets': 'totalAssets',
+                'Total Liabilities Net Minority Interest': 'totalLiabilities',
+                'Stockholders Equity': 'totalEquity',
+                'Cash And Cash Equivalents': 'cash',
+                'Total Debt': 'totalDebt'
+            }
+
+            # 현금흐름표 키 매핑
+            cashflow_keys = {
+                'Operating Cash Flow': 'operatingCashFlow',
+                'Investing Cash Flow': 'investingCashFlow',
+                'Financing Cash Flow': 'financingCashFlow',
+                'Free Cash Flow': 'freeCashFlow'
+            }
 
             # 주요 재무 지표 추출
             financials_data = {
@@ -1030,44 +1079,13 @@ class StockDataService:
                     "priceToBook": round(info.get('priceToBook', 0), 2) if info.get('priceToBook') else None,
                     "dividendYield": round(info.get('dividendYield', 0) * 100, 2) if info.get('dividendYield') else None,
                 },
-                # 손익계산서
-                "incomeStatement": {
-                    "totalRevenue": safe_get(income_stmt, 'Total Revenue'),
-                    "totalRevenueFormatted": format_number(safe_get(income_stmt, 'Total Revenue')),
-                    "grossProfit": safe_get(income_stmt, 'Gross Profit'),
-                    "grossProfitFormatted": format_number(safe_get(income_stmt, 'Gross Profit')),
-                    "operatingIncome": safe_get(income_stmt, 'Operating Income'),
-                    "operatingIncomeFormatted": format_number(safe_get(income_stmt, 'Operating Income')),
-                    "netIncome": safe_get(income_stmt, 'Net Income'),
-                    "netIncomeFormatted": format_number(safe_get(income_stmt, 'Net Income')),
-                    "ebitda": safe_get(income_stmt, 'EBITDA'),
-                    "ebitdaFormatted": format_number(safe_get(income_stmt, 'EBITDA')),
-                },
-                # 대차대조표
-                "balanceSheet": {
-                    "totalAssets": safe_get(balance_sheet, 'Total Assets'),
-                    "totalAssetsFormatted": format_number(safe_get(balance_sheet, 'Total Assets')),
-                    "totalLiabilities": safe_get(balance_sheet, 'Total Liabilities Net Minority Interest'),
-                    "totalLiabilitiesFormatted": format_number(safe_get(balance_sheet, 'Total Liabilities Net Minority Interest')),
-                    "totalEquity": safe_get(balance_sheet, 'Stockholders Equity'),
-                    "totalEquityFormatted": format_number(safe_get(balance_sheet, 'Stockholders Equity')),
-                    "cash": safe_get(balance_sheet, 'Cash And Cash Equivalents'),
-                    "cashFormatted": format_number(safe_get(balance_sheet, 'Cash And Cash Equivalents')),
-                    "totalDebt": safe_get(balance_sheet, 'Total Debt'),
-                    "totalDebtFormatted": format_number(safe_get(balance_sheet, 'Total Debt')),
-                },
-                # 현금흐름표
-                "cashFlow": {
-                    "operatingCashFlow": safe_get(cashflow, 'Operating Cash Flow'),
-                    "operatingCashFlowFormatted": format_number(safe_get(cashflow, 'Operating Cash Flow')),
-                    "investingCashFlow": safe_get(cashflow, 'Investing Cash Flow'),
-                    "investingCashFlowFormatted": format_number(safe_get(cashflow, 'Investing Cash Flow')),
-                    "financingCashFlow": safe_get(cashflow, 'Financing Cash Flow'),
-                    "financingCashFlowFormatted": format_number(safe_get(cashflow, 'Financing Cash Flow')),
-                    "freeCashFlow": safe_get(cashflow, 'Free Cash Flow'),
-                    "freeCashFlowFormatted": format_number(safe_get(cashflow, 'Free Cash Flow')),
-                },
-                # 수익성 지표
+                # 5개년 손익계산서
+                "incomeStatementYearly": get_yearly_data(income_stmt, income_keys),
+                # 5개년 대차대조표
+                "balanceSheetYearly": get_yearly_data(balance_sheet, balance_keys),
+                # 5개년 현금흐름표
+                "cashFlowYearly": get_yearly_data(cashflow, cashflow_keys),
+                # 수익성 지표 (현재)
                 "profitability": {
                     "grossMargin": round(info.get('grossMargins', 0) * 100, 2) if info.get('grossMargins') else None,
                     "operatingMargin": round(info.get('operatingMargins', 0) * 100, 2) if info.get('operatingMargins') else None,

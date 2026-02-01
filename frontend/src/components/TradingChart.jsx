@@ -31,12 +31,47 @@ const parseDate = (dateStr) => {
   return isNaN(parsed) ? null : Math.floor(parsed / 1000)
 }
 
+// 데이터 정렬 헬퍼 함수
+const sortByTime = (arr) => arr.sort((a, b) => {
+  if (typeof a.time === 'string' && typeof b.time === 'string') {
+    return a.time.localeCompare(b.time)
+  }
+  return a.time - b.time
+})
+
+// 캔들 데이터 변환 함수
+const parseChartData = (rawData) => {
+  const candleMap = new Map()
+  rawData.forEach(d => {
+    const time = parseDate(d.date)
+    if (time !== null && time !== undefined) {
+      candleMap.set(String(time), {
+        time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      })
+    }
+  })
+  return Array.from(candleMap.values()).sort((a, b) => {
+    if (typeof a.time === 'string' && typeof b.time === 'string') {
+      return a.time.localeCompare(b.time)
+    }
+    return a.time - b.time
+  })
+}
+
 const TradingChart = ({
   data,
   indicators = {},
   supportResistance = {},
-  isKorean = false,
-  height = 400
+  height = 400,
+  period = '6mo',
+  interval = '1d',
+  onPeriodChange = null,
+  onIntervalChange = null,
+  isLoading = false
 }) => {
   const chartContainerRef = useRef(null)
   const chartRef = useRef(null)
@@ -78,16 +113,12 @@ const TradingChart = ({
     return () => window.removeEventListener('resize', updateHeight)
   }, [isFullscreen])
 
-  // 차트 초기화
+  // 차트 생성 (한 번만)
   useEffect(() => {
-    if (!chartContainerRef.current || !data || data.length === 0) return
+    if (!chartContainerRef.current) return
 
-    // 컨테이너 크기 확인
     const containerWidth = chartContainerRef.current.clientWidth
-    console.log('Container width:', containerWidth)
-
     if (containerWidth === 0) {
-      // 컨테이너가 아직 렌더링되지 않은 경우 재시도
       const timer = setTimeout(() => {
         if (chartContainerRef.current) {
           chartContainerRef.current.dispatchEvent(new Event('resize'))
@@ -96,255 +127,60 @@ const TradingChart = ({
       return () => clearTimeout(timer)
     }
 
-    // 기존 차트 제거
-    if (chartRef.current) {
-      chartRef.current.remove()
-      chartRef.current = null
-    }
+    // 차트가 이미 있으면 생성하지 않음
+    if (chartRef.current) return
 
-    let chart = null
-
-    try {
-      // 차트 생성
-      chart = createChart(chartContainerRef.current, {
-        width: containerWidth || 800,
-        height: isFullscreen ? fullscreenHeight : height,
-        layout: {
-          background: { type: 'solid', color: 'transparent' },
-          textColor: '#a0a0a0',
+    // 차트 생성
+    const chart = createChart(chartContainerRef.current, {
+      width: containerWidth || 800,
+      height: height,
+      layout: {
+        background: { type: 'solid', color: 'transparent' },
+        textColor: '#a0a0a0',
+      },
+      grid: {
+        vertLines: { color: 'rgba(255, 255, 255, 0.1)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.1)' },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          width: 1,
+          color: 'rgba(102, 126, 234, 0.5)',
+          style: 2,
         },
-        grid: {
-          vertLines: { color: 'rgba(255, 255, 255, 0.1)' },
-          horzLines: { color: 'rgba(255, 255, 255, 0.1)' },
+        horzLine: {
+          width: 1,
+          color: 'rgba(102, 126, 234, 0.5)',
+          style: 2,
         },
-        crosshair: {
-          mode: CrosshairMode.Normal,
-          vertLine: {
-            width: 1,
-            color: 'rgba(102, 126, 234, 0.5)',
-            style: 2,
-          },
-          horzLine: {
-            width: 1,
-            color: 'rgba(102, 126, 234, 0.5)',
-            style: 2,
-          },
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        scaleMargins: {
+          top: 0.1,
+          bottom: 0.2,
         },
-        rightPriceScale: {
-          borderColor: 'rgba(255, 255, 255, 0.2)',
-          scaleMargins: {
-            top: 0.1,
-            bottom: 0.2,
-          },
-        },
-        timeScale: {
-          borderColor: 'rgba(255, 255, 255, 0.2)',
-          timeVisible: true,
-          secondsVisible: false,
-        },
-        handleScroll: {
-          mouseWheel: true,
-          pressedMouseMove: true,
-          horzTouchDrag: true,
-          vertTouchDrag: true,
-        },
-        handleScale: {
-          axisPressedMouseMove: true,
-          mouseWheel: true,
-          pinch: true,
-        },
-      })
+      },
+      timeScale: {
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
+      },
+    })
 
-      chartRef.current = chart
-
-      // 캔들스틱 시리즈 추가
-      const candleSeries = chart.addSeries(CandlestickSeries, {
-        upColor: '#22c55e',
-        downColor: '#ef4444',
-        borderDownColor: '#ef4444',
-        borderUpColor: '#22c55e',
-        wickDownColor: '#ef4444',
-        wickUpColor: '#22c55e',
-      })
-
-      // 데이터 변환 및 설정 (날짜를 Unix timestamp로 변환)
-      console.log('Raw data sample:', data[0], data[data.length - 1])
-
-      // 중복 타임스탬프 제거를 위한 Map 사용
-      const candleMap = new Map()
-      data.forEach(d => {
-        const time = parseDate(d.date)
-        if (time !== null && time !== undefined) {
-          candleMap.set(String(time), {
-            time,
-            open: d.open,
-            high: d.high,
-            low: d.low,
-            close: d.close,
-          })
-        }
-      })
-
-      const candleData = Array.from(candleMap.values()).sort((a, b) => {
-        // 문자열 날짜는 알파벳 순으로 정렬 (ISO 형식이므로 정확함)
-        if (typeof a.time === 'string' && typeof b.time === 'string') {
-          return a.time.localeCompare(b.time)
-        }
-        // 숫자 타임스탬프는 숫자 비교
-        return a.time - b.time
-      })
-
-      console.log('Parsed candle data sample:', candleData[0], candleData[candleData.length - 1])
-      console.log('Total candles:', candleData.length)
-
-      if (candleData.length === 0) {
-        console.error('No valid candle data')
-        return
-      }
-
-      candleSeries.setData(candleData)
-      candleSeriesRef.current = candleSeries
-      candleDataRef.current = candleData // 자석 기능용 데이터 저장
-
-      // 데이터 정렬 헬퍼 함수
-      const sortByTime = (arr) => arr.sort((a, b) => {
-        if (typeof a.time === 'string' && typeof b.time === 'string') {
-          return a.time.localeCompare(b.time)
-        }
-        return a.time - b.time
-      })
-
-      // 거래량 시리즈 추가
-      if (indicators.volume) {
-        const volumeSeries = chart.addSeries(HistogramSeries, {
-          color: '#667eea',
-          priceFormat: {
-            type: 'volume',
-          },
-          priceScaleId: 'volume',
-        })
-        volumeSeries.priceScale().applyOptions({
-          scaleMargins: {
-            top: 1 - volumeRatio,
-            bottom: 0,
-          },
-        })
-        const volumeData = data
-          .map(d => ({
-            time: parseDate(d.date),
-            value: d.volume,
-            color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-          }))
-          .filter(d => d.time !== null && d.time !== undefined)
-        volumeSeries.setData(sortByTime(volumeData))
-        volumeSeriesRef.current = volumeSeries
-      }
-
-      // 이동평균선 추가
-      const maColors = {
-        ma5: '#ff6b6b',
-        ma20: '#ffd93d',
-        ma60: '#6bcb77',
-        ma120: '#9d4edd',
-      }
-
-      Object.entries(maColors).forEach(([key, color]) => {
-        if (indicators[key]) {
-          const maData = data
-            .filter(d => d[key] !== null && d[key] !== undefined)
-            .map(d => ({ time: parseDate(d.date), value: d[key] }))
-            .filter(d => d.time !== null && d.time !== undefined)
-
-          if (maData.length > 0) {
-            const maSeries = chart.addSeries(LineSeries, {
-              color: color,
-              lineWidth: 1,
-              priceLineVisible: false,
-              lastValueVisible: false,
-            })
-            maSeries.setData(sortByTime(maData))
-            lineSeriesRefs.current[key] = maSeries
-          }
-        }
-      })
-
-      // 볼린저 밴드 추가
-      if (indicators.bollinger) {
-        const bbUpperData = data
-          .filter(d => d.bb_upper !== null && d.bb_upper !== undefined)
-          .map(d => ({ time: parseDate(d.date), value: d.bb_upper }))
-          .filter(d => d.time !== null && d.time !== undefined)
-        const bbLowerData = data
-          .filter(d => d.bb_lower !== null && d.bb_lower !== undefined)
-          .map(d => ({ time: parseDate(d.date), value: d.bb_lower }))
-          .filter(d => d.time !== null && d.time !== undefined)
-        const bbMiddleData = data
-          .filter(d => d.bb_middle !== null && d.bb_middle !== undefined)
-          .map(d => ({ time: parseDate(d.date), value: d.bb_middle }))
-          .filter(d => d.time !== null && d.time !== undefined)
-
-        if (bbUpperData.length > 0) {
-          const bbUpperSeries = chart.addSeries(LineSeries, {
-            color: '#4ecdc4',
-            lineWidth: 1,
-            lineStyle: 0,
-            priceLineVisible: false,
-            lastValueVisible: false,
-          })
-          bbUpperSeries.setData(sortByTime(bbUpperData))
-
-          const bbLowerSeries = chart.addSeries(LineSeries, {
-            color: '#4ecdc4',
-            lineWidth: 1,
-            lineStyle: 0,
-            priceLineVisible: false,
-            lastValueVisible: false,
-          })
-          bbLowerSeries.setData(sortByTime(bbLowerData))
-
-          const bbMiddleSeries = chart.addSeries(LineSeries, {
-            color: '#4ecdc4',
-            lineWidth: 1,
-            lineStyle: 2,
-            priceLineVisible: false,
-            lastValueVisible: false,
-          })
-          bbMiddleSeries.setData(sortByTime(bbMiddleData))
-        }
-      }
-
-      // 지지선/저항선 추가
-      if (supportResistance.resistance) {
-        supportResistance.resistance.forEach(level => {
-          candleSeries.createPriceLine({
-            price: level,
-            color: '#ef4444',
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: 'R',
-          })
-        })
-      }
-      if (supportResistance.support) {
-        supportResistance.support.forEach(level => {
-          candleSeries.createPriceLine({
-            price: level,
-            color: '#22c55e',
-            lineWidth: 1,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: 'S',
-          })
-        })
-      }
-
-      // 차트 크기 조정
-      chart.timeScale().fitContent()
-
-    } catch (error) {
-      console.error('Error initializing chart:', error)
-    }
+    chartRef.current = chart
 
     // 리사이즈 핸들러
     const handleResize = () => {
@@ -352,6 +188,7 @@ const TradingChart = ({
         chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth })
       }
     }
+
     window.addEventListener('resize', handleResize)
 
     return () => {
@@ -359,15 +196,213 @@ const TradingChart = ({
       if (chartRef.current) {
         chartRef.current.remove()
         chartRef.current = null
+        candleSeriesRef.current = null
+        volumeSeriesRef.current = null
+        lineSeriesRefs.current = {}
       }
     }
-  }, [data, indicators, supportResistance, height, isFullscreen, volumeRatio, fullscreenHeight])
+  }, [height])
+
+  // 전체화면/높이 변경 시 차트 크기 조정
+  useEffect(() => {
+    if (!chartRef.current || !chartContainerRef.current) return
+
+    // CSS 변경이 적용될 때까지 약간 대기
+    const resizeChart = () => {
+      if (!chartRef.current || !chartContainerRef.current) return
+      const containerWidth = chartContainerRef.current.clientWidth
+      chartRef.current.applyOptions({
+        width: containerWidth,
+        height: isFullscreen ? fullscreenHeight : height,
+      })
+    }
+
+    // 즉시 한 번 실행
+    resizeChart()
+
+    // CSS 애니메이션/전환 후 다시 실행
+    const timer = setTimeout(resizeChart, 50)
+    return () => clearTimeout(timer)
+  }, [isFullscreen, fullscreenHeight, height])
+
+  // 데이터 업데이트 (차트 재생성 없이 시리즈만 업데이트)
+  useEffect(() => {
+    if (!chartRef.current || !data || data.length === 0) return
+
+    const chart = chartRef.current
+
+    // 기존 시리즈 모두 제거
+    try {
+      if (candleSeriesRef.current) {
+        chart.removeSeries(candleSeriesRef.current)
+        candleSeriesRef.current = null
+      }
+      if (volumeSeriesRef.current) {
+        chart.removeSeries(volumeSeriesRef.current)
+        volumeSeriesRef.current = null
+      }
+      Object.values(lineSeriesRefs.current).forEach(series => {
+        try { chart.removeSeries(series) } catch (e) {}
+      })
+      lineSeriesRefs.current = {}
+    } catch (e) {
+      console.log('Series cleanup:', e)
+    }
+
+    // 캔들스틱 시리즈 추가
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderDownColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+    })
+
+    const candleData = parseChartData(data)
+    if (candleData.length === 0) {
+      console.error('No valid candle data')
+      return
+    }
+
+    candleSeries.setData(candleData)
+    candleSeriesRef.current = candleSeries
+    candleDataRef.current = candleData
+
+    // 거래량 시리즈 추가
+    if (indicators.volume) {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        color: '#667eea',
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+      })
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: { top: 1 - volumeRatio, bottom: 0 },
+      })
+      const volumeData = data
+        .map(d => ({
+          time: parseDate(d.date),
+          value: d.volume,
+          color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        }))
+        .filter(d => d.time !== null && d.time !== undefined)
+      volumeSeries.setData(sortByTime(volumeData))
+      volumeSeriesRef.current = volumeSeries
+    }
+
+    // 이동평균선 추가
+    const maColors = {
+      ma5: '#ff6b6b',
+      ma20: '#ffd93d',
+      ma60: '#6bcb77',
+      ma120: '#9d4edd',
+    }
+
+    Object.entries(maColors).forEach(([key, color]) => {
+      if (indicators[key]) {
+        const maData = data
+          .filter(d => d[key] !== null && d[key] !== undefined)
+          .map(d => ({ time: parseDate(d.date), value: d[key] }))
+          .filter(d => d.time !== null && d.time !== undefined)
+
+        if (maData.length > 0) {
+          const maSeries = chart.addSeries(LineSeries, {
+            color: color,
+            lineWidth: 1,
+            priceLineVisible: false,
+            lastValueVisible: false,
+          })
+          maSeries.setData(sortByTime(maData))
+          lineSeriesRefs.current[key] = maSeries
+        }
+      }
+    })
+
+    // 볼린저 밴드 추가
+    if (indicators.bollinger) {
+      const bbUpperData = data
+        .filter(d => d.bb_upper !== null && d.bb_upper !== undefined)
+        .map(d => ({ time: parseDate(d.date), value: d.bb_upper }))
+        .filter(d => d.time !== null && d.time !== undefined)
+      const bbLowerData = data
+        .filter(d => d.bb_lower !== null && d.bb_lower !== undefined)
+        .map(d => ({ time: parseDate(d.date), value: d.bb_lower }))
+        .filter(d => d.time !== null && d.time !== undefined)
+      const bbMiddleData = data
+        .filter(d => d.bb_middle !== null && d.bb_middle !== undefined)
+        .map(d => ({ time: parseDate(d.date), value: d.bb_middle }))
+        .filter(d => d.time !== null && d.time !== undefined)
+
+      if (bbUpperData.length > 0) {
+        const bbUpperSeries = chart.addSeries(LineSeries, {
+          color: '#4ecdc4',
+          lineWidth: 1,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        bbUpperSeries.setData(sortByTime(bbUpperData))
+        lineSeriesRefs.current['bbUpper'] = bbUpperSeries
+
+        const bbLowerSeries = chart.addSeries(LineSeries, {
+          color: '#4ecdc4',
+          lineWidth: 1,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        bbLowerSeries.setData(sortByTime(bbLowerData))
+        lineSeriesRefs.current['bbLower'] = bbLowerSeries
+
+        const bbMiddleSeries = chart.addSeries(LineSeries, {
+          color: '#4ecdc4',
+          lineWidth: 1,
+          lineStyle: 2,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        bbMiddleSeries.setData(sortByTime(bbMiddleData))
+        lineSeriesRefs.current['bbMiddle'] = bbMiddleSeries
+      }
+    }
+
+    // 지지선/저항선 추가
+    if (supportResistance.resistance) {
+      supportResistance.resistance.forEach(level => {
+        candleSeries.createPriceLine({
+          price: level,
+          color: '#ef4444',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'R',
+        })
+      })
+    }
+    if (supportResistance.support) {
+      supportResistance.support.forEach(level => {
+        candleSeries.createPriceLine({
+          price: level,
+          color: '#22c55e',
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: 'S',
+        })
+      })
+    }
+
+    // 차트 크기 조정
+    chart.timeScale().fitContent()
+
+  }, [data, indicators, supportResistance, volumeRatio])
 
   // 캔버스 크기 초기화
   useEffect(() => {
     if (!canvasRef.current || !chartContainerRef.current) return
 
     const resizeCanvas = () => {
+      if (!canvasRef.current || !chartContainerRef.current) return
       const rect = chartContainerRef.current.getBoundingClientRect()
       canvasRef.current.width = rect.width
       canvasRef.current.height = rect.height
@@ -375,8 +410,14 @@ const TradingChart = ({
     }
 
     resizeCanvas()
+    // CSS 전환 후 다시 실행
+    const timer = setTimeout(resizeCanvas, 50)
+
     window.addEventListener('resize', resizeCanvas)
-    return () => window.removeEventListener('resize', resizeCanvas)
+    return () => {
+      window.removeEventListener('resize', resizeCanvas)
+      clearTimeout(timer)
+    }
   }, [data, height, trendLines, isFullscreen])
 
   // 차트 스케일/이동 변경 시 선 다시 그리기
@@ -406,7 +447,7 @@ const TradingChart = ({
         // 차트가 이미 제거된 경우 무시
       }
     }
-  }, [data])
+  }, [])
 
   // 그리기 모드일 때 차트 인터랙션 비활성화
   useEffect(() => {
@@ -653,23 +694,15 @@ const TradingChart = ({
     ctx.clearRect(0, 0, rect.width, rect.height)
 
     // 저장된 추세선 그리기
-    trendLines.forEach((line, idx) => {
+    trendLines.forEach((line) => {
       // 차트 좌표가 있으면 현재 스케일에 맞게 픽셀 좌표 계산
       let startX = line.startX
       let startY = line.startY
       let endX = line.endX
       let endY = line.endY
 
-      console.log(`Line ${idx} chart coords:`, {
-        startTime: line.startTime,
-        startPrice: line.startPrice,
-        endTime: line.endTime,
-        endPrice: line.endPrice
-      })
-
       if (line.startTime !== undefined && line.startPrice !== undefined) {
         const startCoords = chartToPixelCoords(line.startTime, line.startPrice)
-        console.log(`Line ${idx} start pixel coords:`, startCoords)
         if (startCoords) {
           startX = startCoords.x
           startY = startCoords.y
@@ -677,7 +710,6 @@ const TradingChart = ({
       }
       if (line.endTime !== undefined && line.endPrice !== undefined) {
         const endCoords = chartToPixelCoords(line.endTime, line.endPrice)
-        console.log(`Line ${idx} end pixel coords:`, endCoords)
         if (endCoords) {
           endX = endCoords.x
           endY = endCoords.y
@@ -878,6 +910,56 @@ const TradingChart = ({
         {drawMode && <span className="draw-hint">차트 위에서 드래그하여 그리기</span>}
       </div>
 
+      {/* 기간/봉 타입 선택 (전체화면에서만 표시) */}
+      {isFullscreen && onPeriodChange && onIntervalChange && (
+        <div className="fullscreen-controls">
+          <div className="control-group">
+            <span className="control-label">기간</span>
+            <div className="control-buttons">
+              {[
+                { value: '1mo', label: '1개월' },
+                { value: '3mo', label: '3개월' },
+                { value: '6mo', label: '6개월' },
+                { value: '1y', label: '1년' },
+                { value: '2y', label: '2년' },
+                { value: '5y', label: '5년' }
+              ].map(p => (
+                <button
+                  key={p.value}
+                  className={`control-btn ${period === p.value ? 'active' : ''}`}
+                  onClick={() => onPeriodChange(p.value)}
+                  disabled={isLoading}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="control-group">
+            <span className="control-label">봉 타입</span>
+            <div className="control-buttons">
+              {[
+                { value: '1h', label: '1시간' },
+                { value: '4h', label: '4시간' },
+                { value: '1d', label: '일봉' },
+                { value: '1wk', label: '주봉' },
+                { value: '1mo', label: '월봉' }
+              ].map(i => (
+                <button
+                  key={i.value}
+                  className={`control-btn ${interval === i.value ? 'active' : ''}`}
+                  onClick={() => onIntervalChange(i.value)}
+                  disabled={isLoading}
+                >
+                  {i.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {isLoading && <span className="loading-hint">로딩중...</span>}
+        </div>
+      )}
+
       {/* 차트 컨테이너 */}
       <div className="chart-wrapper" style={{ position: 'relative' }}>
         <div
@@ -948,20 +1030,12 @@ const TradingChart = ({
     </>
   )
 
-  // 전체 화면 모드
-  if (isFullscreen) {
-    return (
-      <div className="trading-chart-fullscreen">
-        <div className="trading-chart-wrapper fullscreen">
-          {chartContent}
-        </div>
-      </div>
-    )
-  }
-
+  // 단일 구조로 렌더링 (전체화면은 CSS 클래스로 처리)
   return (
-    <div className="trading-chart-wrapper">
-      {chartContent}
+    <div className={isFullscreen ? 'trading-chart-fullscreen' : ''}>
+      <div className={`trading-chart-wrapper ${isFullscreen ? 'fullscreen' : ''}`}>
+        {chartContent}
+      </div>
     </div>
   )
 }

@@ -1396,6 +1396,51 @@ tr.oversold-row .rsi-badge {
   font-weight: 600;
 }
 
+/* 재무제표 테이블 */
+.financials-table-wrapper {
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.financials-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.financials-table th,
+.financials-table td {
+  padding: 0.6rem 0.8rem;
+  text-align: right;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.financials-table th {
+  background: rgba(102, 126, 234, 0.2);
+  color: #fff;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.financials-table th:first-child,
+.financials-table td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: rgba(26, 26, 46, 0.95);
+  color: #a0a0a0;
+  font-weight: 500;
+  min-width: 100px;
+}
+
+.financials-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.financials-table td {
+  color: #e5e5e5;
+}
+
 .company-info {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 8px;
@@ -1657,4 +1702,71 @@ tr.oversold-row .rsi-badge {
 .volume-resize-handle:hover div {
   background-color: #667eea !important;
   box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
+
+/* 전체화면 차트 컨트롤 */
+.fullscreen-controls {
+  position: absolute;
+  top: 50px;
+  left: 10px;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(26, 26, 46, 0.95);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+}
+
+.fullscreen-controls .control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fullscreen-controls .control-label {
+  font-size: 11px;
+  color: #a0a0a0;
+  font-weight: 500;
+}
+
+.fullscreen-controls .control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fullscreen-controls .control-btn {
+  padding: 5px 10px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #a0a0a0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fullscreen-controls .control-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.fullscreen-controls .control-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  border-color: #667eea;
+}
+
+.fullscreen-controls .control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fullscreen-controls .loading-hint {
+  font-size: 10px;
+  color: #667eea;
+  text-align: center;
 }

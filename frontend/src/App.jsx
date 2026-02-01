@@ -71,7 +71,7 @@ function App() {
     setError(null)
 
     try {
-      let url = `http://localhost:8000/api/v1/scan/preview?market=${market}&limit=${limit}&market_cap=${marketCap}&sector=${sector}&page=${page}&page_size=50`
+      let url = `http://localhost:8001/api/v1/scan/preview?market=${market}&limit=${limit}&market_cap=${marketCap}&sector=${sector}&page=${page}&page_size=50`
       if (search) {
         url += `&search=${encodeURIComponent(search)}`
       }
@@ -132,7 +132,7 @@ function App() {
     setIsValidating(true)
     try {
       // 2. 미리보기 API로 전체 목록에서 종목 검색 (해당 시장에서만)
-      const previewCheckUrl = `http://localhost:8000/api/v1/scan/preview?market=${addStockMarket.toLowerCase()}&limit=500&search=${encodeURIComponent(symbol)}&page=1&page_size=10`
+      const previewCheckUrl = `http://localhost:8001/api/v1/scan/preview?market=${addStockMarket.toLowerCase()}&limit=500&search=${encodeURIComponent(symbol)}&page=1&page_size=10`
       const previewResponse = await fetch(previewCheckUrl)
       const previewResult = await previewResponse.json()
 
@@ -148,7 +148,7 @@ function App() {
 
       // 3. 백엔드 API로 종목 존재 여부 검증
       const response = await fetch(
-        `http://localhost:8000/api/v1/stock/validate?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(addStockMarket)}`
+        `http://localhost:8001/api/v1/stock/validate?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(addStockMarket)}`
       )
       const result = await response.json()
 
@@ -198,7 +198,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(stock.symbol)}?market=${encodeURIComponent(stock.market)}&period=${period}&interval=${interval}`
+        `http://localhost:8001/api/v1/stock/detail/${encodeURIComponent(stock.symbol)}?market=${encodeURIComponent(stock.market)}&period=${period}&interval=${interval}`
       )
       const data = await response.json()
 
@@ -224,7 +224,7 @@ function App() {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/stock/detail/${encodeURIComponent(selectedStock.symbol)}?market=${encodeURIComponent(selectedStock.market)}&period=${newPeriod}&interval=${newInterval}`
+        `http://localhost:8001/api/v1/stock/detail/${encodeURIComponent(selectedStock.symbol)}?market=${encodeURIComponent(selectedStock.market)}&period=${newPeriod}&interval=${newInterval}`
       )
       const data = await response.json()
 
@@ -290,7 +290,7 @@ function App() {
     }
 
     // 커스텀 종목을 쿼리에 추가
-    let url = `http://localhost:8000/api/v1/scan/oversold/stream?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}&market_cap=${marketCap}&sector=${sector}&period=${period}`
+    let url = `http://localhost:8001/api/v1/scan/oversold/stream?market=${market}&rsi_threshold=${rsiThreshold}&limit=${limit}&market_cap=${marketCap}&sector=${sector}&period=${period}`
     if (customStocks.length > 0) {
       url += `&custom_stocks=${encodeURIComponent(JSON.stringify(customStocks))}`
     }
@@ -837,12 +837,14 @@ function App() {
                 <button className="close-button" onClick={closeDetail}>×</button>
               </div>
 
-              {isLoadingDetail ? (
+              {/* 초기 로딩 (데이터가 없을 때만 전체 스피너 표시) */}
+              {isLoadingDetail && !stockDetail && (
                 <div className="detail-loading">
                   <div className="spinner"></div>
                   <p>상세 정보를 불러오는 중...</p>
                 </div>
-              ) : stockDetail?.error ? (
+              )}
+              {stockDetail?.error ? (
                 <div className="detail-error">
                   <p>{stockDetail.error}</p>
                 </div>
@@ -1043,13 +1045,37 @@ function App() {
                     </div>
 
                     {/* 메인 가격 차트 (캔들스틱 + 추세선 그리기) */}
-                    <TradingChart
-                      data={stockDetail.chart_data}
-                      indicators={chartIndicators}
-                      supportResistance={stockDetail.support_resistance}
-                      isKorean={['KOSPI', 'KOSDAQ'].includes(stockDetail.market)}
-                      height={400}
-                    />
+                    <div style={{ position: 'relative' }}>
+                      <TradingChart
+                        data={stockDetail.chart_data}
+                        indicators={chartIndicators}
+                        supportResistance={stockDetail.support_resistance}
+                        height={400}
+                        period={chartPeriod}
+                        interval={chartInterval}
+                        onPeriodChange={(p) => refreshChartData(p, chartInterval)}
+                        onIntervalChange={(i) => refreshChartData(chartPeriod, i)}
+                        isLoading={isLoadingDetail}
+                      />
+                      {/* 데이터 새로고침 중 오버레이 */}
+                      {isLoadingDetail && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          background: 'rgba(26, 26, 46, 0.7)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          zIndex: 100,
+                          borderRadius: '8px'
+                        }}>
+                          <div className="spinner" style={{ width: '30px', height: '30px' }}></div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* 거래량 차트 */}
                     {chartIndicators.volume && (
@@ -1148,10 +1174,10 @@ function App() {
                     </div>
                   </div>
 
-                  {/* 재무제표 */}
+                  {/* 재무제표 (5개년) */}
                   {stockDetail.financials?.available && (
                     <div className="financials-section">
-                      <h4>재무 정보</h4>
+                      <h4>재무 정보 (5개년)</h4>
 
                       {/* 기본 정보 */}
                       {stockDetail.financials.basic && (
@@ -1192,113 +1218,149 @@ function App() {
                         </div>
                       )}
 
-                      {/* 손익계산서 */}
-                      {stockDetail.financials.incomeStatement && (
+                      {/* 5개년 손익계산서 */}
+                      {stockDetail.financials.incomeStatementYearly?.length > 0 && (
                         <div className="financials-subsection">
-                          <h5>손익계산서</h5>
-                          <div className="financials-grid">
-                            {stockDetail.financials.incomeStatement.totalRevenueFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">매출액</span>
-                                <span className="financial-value">{stockDetail.financials.incomeStatement.totalRevenueFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.incomeStatement.grossProfitFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">매출총이익</span>
-                                <span className="financial-value">{stockDetail.financials.incomeStatement.grossProfitFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.incomeStatement.operatingIncomeFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">영업이익</span>
-                                <span className="financial-value">{stockDetail.financials.incomeStatement.operatingIncomeFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.incomeStatement.netIncomeFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">순이익</span>
-                                <span className="financial-value">{stockDetail.financials.incomeStatement.netIncomeFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.incomeStatement.ebitdaFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">EBITDA</span>
-                                <span className="financial-value">{stockDetail.financials.incomeStatement.ebitdaFormatted}</span>
-                              </div>
-                            )}
+                          <h5>손익계산서 (연간)</h5>
+                          <div className="financials-table-wrapper">
+                            <table className="financials-table">
+                              <thead>
+                                <tr>
+                                  <th>항목</th>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <th key={y.year}>{y.year}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td>매출액</td>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <td key={y.year}>{y.totalRevenueFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>매출총이익</td>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <td key={y.year}>{y.grossProfitFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>영업이익</td>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <td key={y.year}>{y.operatingIncomeFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>순이익</td>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <td key={y.year}>{y.netIncomeFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>EBITDA</td>
+                                  {stockDetail.financials.incomeStatementYearly.map(y => (
+                                    <td key={y.year}>{y.ebitdaFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       )}
 
-                      {/* 대차대조표 */}
-                      {stockDetail.financials.balanceSheet && (
+                      {/* 5개년 대차대조표 */}
+                      {stockDetail.financials.balanceSheetYearly?.length > 0 && (
                         <div className="financials-subsection">
-                          <h5>대차대조표</h5>
-                          <div className="financials-grid">
-                            {stockDetail.financials.balanceSheet.totalAssetsFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">총자산</span>
-                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalAssetsFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.balanceSheet.totalLiabilitiesFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">총부채</span>
-                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalLiabilitiesFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.balanceSheet.totalEquityFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">자기자본</span>
-                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalEquityFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.balanceSheet.cashFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">현금</span>
-                                <span className="financial-value">{stockDetail.financials.balanceSheet.cashFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.balanceSheet.totalDebtFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">총부채</span>
-                                <span className="financial-value">{stockDetail.financials.balanceSheet.totalDebtFormatted}</span>
-                              </div>
-                            )}
+                          <h5>대차대조표 (연간)</h5>
+                          <div className="financials-table-wrapper">
+                            <table className="financials-table">
+                              <thead>
+                                <tr>
+                                  <th>항목</th>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <th key={y.year}>{y.year}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td>총자산</td>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <td key={y.year}>{y.totalAssetsFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>총부채</td>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <td key={y.year}>{y.totalLiabilitiesFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>자기자본</td>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <td key={y.year}>{y.totalEquityFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>현금</td>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <td key={y.year}>{y.cashFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>총부채</td>
+                                  {stockDetail.financials.balanceSheetYearly.map(y => (
+                                    <td key={y.year}>{y.totalDebtFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       )}
 
-                      {/* 현금흐름표 */}
-                      {stockDetail.financials.cashFlow && (
+                      {/* 5개년 현금흐름표 */}
+                      {stockDetail.financials.cashFlowYearly?.length > 0 && (
                         <div className="financials-subsection">
-                          <h5>현금흐름표</h5>
-                          <div className="financials-grid">
-                            {stockDetail.financials.cashFlow.operatingCashFlowFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">영업활동</span>
-                                <span className="financial-value">{stockDetail.financials.cashFlow.operatingCashFlowFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.cashFlow.investingCashFlowFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">투자활동</span>
-                                <span className="financial-value">{stockDetail.financials.cashFlow.investingCashFlowFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.cashFlow.financingCashFlowFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">재무활동</span>
-                                <span className="financial-value">{stockDetail.financials.cashFlow.financingCashFlowFormatted}</span>
-                              </div>
-                            )}
-                            {stockDetail.financials.cashFlow.freeCashFlowFormatted && (
-                              <div className="financial-item">
-                                <span className="financial-label">잉여현금흐름</span>
-                                <span className="financial-value">{stockDetail.financials.cashFlow.freeCashFlowFormatted}</span>
-                              </div>
-                            )}
+                          <h5>현금흐름표 (연간)</h5>
+                          <div className="financials-table-wrapper">
+                            <table className="financials-table">
+                              <thead>
+                                <tr>
+                                  <th>항목</th>
+                                  {stockDetail.financials.cashFlowYearly.map(y => (
+                                    <th key={y.year}>{y.year}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td>영업활동</td>
+                                  {stockDetail.financials.cashFlowYearly.map(y => (
+                                    <td key={y.year}>{y.operatingCashFlowFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>투자활동</td>
+                                  {stockDetail.financials.cashFlowYearly.map(y => (
+                                    <td key={y.year}>{y.investingCashFlowFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>재무활동</td>
+                                  {stockDetail.financials.cashFlowYearly.map(y => (
+                                    <td key={y.year}>{y.financingCashFlowFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  <td>잉여현금흐름</td>
+                                  {stockDetail.financials.cashFlowYearly.map(y => (
+                                    <td key={y.year}>{y.freeCashFlowFormatted || '-'}</td>
+                                  ))}
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       )}
@@ -1306,7 +1368,7 @@ function App() {
                       {/* 수익성 지표 */}
                       {stockDetail.financials.profitability && (
                         <div className="financials-subsection">
-                          <h5>수익성 지표</h5>
+                          <h5>수익성 지표 (현재)</h5>
                           <div className="financials-grid">
                             {stockDetail.financials.profitability.grossMargin && (
                               <div className="financial-item">
@@ -1343,7 +1405,7 @@ function App() {
                       )}
 
                       {/* 기존 형식 지원 (미국 주식) */}
-                      {!stockDetail.financials.basic && (
+                      {!stockDetail.financials.basic && stockDetail.financials.per && (
                         <div className="financials-grid">
                           {stockDetail.financials.per && (
                             <div className="financial-item">
@@ -1367,36 +1429,6 @@ function App() {
                             <div className="financial-item">
                               <span className="financial-label">ROE</span>
                               <span className="financial-value">{formatPercent(stockDetail.financials.roe)}</span>
-                            </div>
-                          )}
-                          {stockDetail.financials.profit_margin && (
-                            <div className="financial-item">
-                              <span className="financial-label">이익률</span>
-                              <span className="financial-value">{formatPercent(stockDetail.financials.profit_margin)}</span>
-                            </div>
-                          )}
-                          {stockDetail.financials.dividend_yield && (
-                            <div className="financial-item">
-                              <span className="financial-label">배당수익률</span>
-                              <span className="financial-value">{formatPercent(stockDetail.financials.dividend_yield)}</span>
-                            </div>
-                          )}
-                          {stockDetail.financials.debt_to_equity && (
-                            <div className="financial-item">
-                              <span className="financial-label">부채비율</span>
-                              <span className="financial-value">{stockDetail.financials.debt_to_equity.toFixed(1)}%</span>
-                            </div>
-                          )}
-                          {stockDetail.financials.revenue && (
-                            <div className="financial-item">
-                              <span className="financial-label">매출</span>
-                              <span className="financial-value">{formatNumber(stockDetail.financials.revenue)}</span>
-                            </div>
-                          )}
-                          {stockDetail.financials.profit && (
-                            <div className="financial-item">
-                              <span className="financial-label">순이익</span>
-                              <span className="financial-value">{formatNumber(stockDetail.financials.profit)}</span>
                             </div>
                           )}
                         </div>
