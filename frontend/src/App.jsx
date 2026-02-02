@@ -20,6 +20,7 @@ function App() {
     ma60: false,
     ma120: false,
     bollinger: true,
+    supportResistance: true,
     volume: true,
     rsi: true,
     macd: true
@@ -770,9 +771,9 @@ function App() {
             <label>시가총액</label>
             <select value={marketCap} onChange={(e) => setMarketCap(e.target.value)}>
               <option value="all">전체</option>
-              <option value="large">대형주</option>
-              <option value="mid">중형주</option>
-              <option value="small">소형주</option>
+              <option value="large">대형주 (한국 10조↑ / 미국 $10B↑)</option>
+              <option value="mid">중형주 (한국 1~10조 / 미국 $2~10B)</option>
+              <option value="small">소형주 (한국 1조↓ / 미국 $2B↓)</option>
             </select>
           </div>
 
@@ -1227,6 +1228,14 @@ function App() {
                           />
                           <span style={{color: '#4ecdc4'}}>볼린저</span>
                         </label>
+                        <label className={`toggle-btn ${chartIndicators.supportResistance ? 'active' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={chartIndicators.supportResistance}
+                            onChange={(e) => setChartIndicators({...chartIndicators, supportResistance: e.target.checked})}
+                          />
+                          <span style={{color: '#f472b6'}}>지지/저항</span>
+                        </label>
                       </div>
                     </div>
 
@@ -1235,7 +1244,7 @@ function App() {
                       <TradingChart
                         data={stockDetail.chart_data}
                         indicators={chartIndicators}
-                        supportResistance={stockDetail.support_resistance}
+                        supportResistance={chartIndicators.supportResistance ? stockDetail.support_resistance : {}}
                         height={400}
                         period={chartPeriod}
                         interval={chartInterval}

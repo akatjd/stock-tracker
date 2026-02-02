@@ -1442,15 +1442,15 @@ class StockDataService:
                         'market': 'KOSDAQ'
                     })
 
-            # 미국 주식 검색 (NASDAQ)
-            nasdaq_symbols = self.get_nasdaq_symbols()
-            for symbol in nasdaq_symbols:
+            # 미국 주식 검색 (NASDAQ + NYSE)
+            us_symbols = self.get_us_symbols()
+            for symbol in us_symbols:
                 if query_upper in symbol:
                     # 심볼이 매칭되면 추가 (이름은 나중에 가져옴)
                     results.append({
                         'symbol': symbol,
                         'name': symbol,  # 일단 심볼을 이름으로
-                        'market': 'NASDAQ'
+                        'market': 'US'
                     })
 
             # 미국 주식 영문명 검색을 위한 일부 인기 종목 매핑
@@ -1494,6 +1494,18 @@ class StockDataService:
                 'SPOT': 'Spotify Technology',
                 'ZM': 'Zoom Video',
                 'COIN': 'Coinbase Global',
+                'NOW': 'ServiceNow Inc.',
+                'COP': 'ConocoPhillips',
+                'CVX': 'Chevron Corporation',
+                'XOM': 'Exxon Mobil',
+                'JNJ': 'Johnson & Johnson',
+                'PFE': 'Pfizer Inc.',
+                'UNH': 'UnitedHealth Group',
+                'HD': 'Home Depot',
+                'NKE': 'Nike Inc.',
+                'MCD': 'McDonald\'s Corporation',
+                'BA': 'Boeing Company',
+                'CAT': 'Caterpillar Inc.',
             }
 
             # 영문 이름으로 검색
@@ -1505,7 +1517,7 @@ class StockDataService:
                         results.append({
                             'symbol': symbol,
                             'name': name,
-                            'market': 'NASDAQ'
+                            'market': 'US'
                         })
                     else:
                         # 이름 업데이트
