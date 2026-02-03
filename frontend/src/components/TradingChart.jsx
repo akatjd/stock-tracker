@@ -79,6 +79,11 @@ const TradingChart = ({
   const volumeSeriesRef = useRef(null)
   const lineSeriesRefs = useRef({})
 
+  // RSI 차트 refs
+  const rsiContainerRef = useRef(null)
+  const rsiChartRef = useRef(null)
+  const rsiSeriesRef = useRef(null)
+
   // 추세선 그리기 상태
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawMode, setDrawMode] = useState(null) // 'trendline', 'horizontal', 'ray'
@@ -97,15 +102,16 @@ const TradingChart = ({
   const [volumeRatio, setVolumeRatio] = useState(0.15)
   const [isResizingVolume, setIsResizingVolume] = useState(false)
 
-  // 전체 화면 차트 높이 계산 (상단 도구바 ~60px + 하단 도움말 ~40px + 여유 공간)
+  // 전체 화면 차트 높이 계산 (상단 도구바 ~60px + RSI ~150px + 하단 도움말 ~40px + 여유)
   const [fullscreenHeight, setFullscreenHeight] = useState(window.innerHeight - 180)
 
   // 전체 화면 높이 업데이트
   useEffect(() => {
     if (!isFullscreen) return
 
+    const rsiSpace = indicators.rsi ? 160 : 0
     const updateHeight = () => {
-      setFullscreenHeight(window.innerHeight - 180)
+      setFullscreenHeight(window.innerHeight - 180 - rsiSpace)
     }
 
     updateHeight()
@@ -405,6 +411,141 @@ const TradingChart = ({
     chart.timeScale().fitContent()
 
   }, [data, indicators, supportResistance, volumeRatio])
+
+  // RSI 차트 생성/업데이트 (전체화면일 때만)
+  useEffect(() => {
+    if (!isFullscreen || !indicators.rsi || !data || data.length === 0) {
+      // 전체화면이 아니거나 RSI 꺼졌으면 제거
+      if (rsiChartRef.current) {
+        rsiChartRef.current.remove()
+        rsiChartRef.current = null
+        rsiSeriesRef.current = null
+      }
+      return
+    }
+
+    if (!rsiContainerRef.current) return
+
+    // RSI 차트가 없으면 생성
+    if (!rsiChartRef.current) {
+      const rsiChart = createChart(rsiContainerRef.current, {
+        width: rsiContainerRef.current.clientWidth || 800,
+        height: 120,
+        layout: {
+          background: { type: 'solid', color: 'transparent' },
+          textColor: '#a0a0a0',
+        },
+        grid: {
+          vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+          horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        rightPriceScale: {
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          scaleMargins: { top: 0.05, bottom: 0.05 },
+        },
+        timeScale: {
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          timeVisible: true,
+          visible: false,
+        },
+        crosshair: {
+          mode: CrosshairMode.Normal,
+        },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true },
+        handleScale: { mouseWheel: true },
+      })
+      rsiChartRef.current = rsiChart
+    }
+
+    const rsiChart = rsiChartRef.current
+
+    // 기존 시리즈 제거
+    if (rsiSeriesRef.current) {
+      try { rsiChart.removeSeries(rsiSeriesRef.current) } catch (e) {}
+      rsiSeriesRef.current = null
+    }
+
+    // RSI 라인 시리즈
+    const rsiSeries = rsiChart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 1.5,
+      priceLineVisible: false,
+      lastValueVisible: true,
+    })
+
+    const rsiData = data
+      .filter(d => d.rsi !== null && d.rsi !== undefined)
+      .map(d => ({ time: parseDate(d.date), value: d.rsi }))
+      .filter(d => d.time !== null && d.time !== undefined)
+
+    if (rsiData.length > 0) {
+      rsiSeries.setData(sortByTime(rsiData))
+
+      // 과매도(30) / 과매수(70) 기준선
+      rsiSeries.createPriceLine({ price: 70, color: '#ef4444', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '' })
+      rsiSeries.createPriceLine({ price: 30, color: '#22c55e', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '' })
+      rsiSeries.createPriceLine({ price: 50, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: '' })
+    }
+
+    rsiSeriesRef.current = rsiSeries
+
+    // 차트 크기 조정
+    rsiChart.applyOptions({ width: rsiContainerRef.current.clientWidth })
+    rsiChart.timeScale().fitContent()
+
+    // 메인 차트와 시간축 동기화
+    if (chartRef.current) {
+      const syncTimeScale = (sourceChart, targetChart) => {
+        const logicalRange = sourceChart.timeScale().getVisibleLogicalRange()
+        if (logicalRange) {
+          targetChart.timeScale().setVisibleLogicalRange(logicalRange)
+        }
+      }
+
+      const onMainRangeChange = () => syncTimeScale(chartRef.current, rsiChart)
+      const onRsiRangeChange = () => syncTimeScale(rsiChart, chartRef.current)
+
+      chartRef.current.timeScale().subscribeVisibleLogicalRangeChange(onMainRangeChange)
+      rsiChart.timeScale().subscribeVisibleLogicalRangeChange(onRsiRangeChange)
+
+      // 초기 동기화
+      syncTimeScale(chartRef.current, rsiChart)
+
+      return () => {
+        try {
+          chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onMainRangeChange)
+          rsiChart.timeScale().unsubscribeVisibleLogicalRangeChange(onRsiRangeChange)
+        } catch (e) {}
+      }
+    }
+  }, [isFullscreen, indicators.rsi, data])
+
+  // RSI 차트 리사이즈
+  useEffect(() => {
+    if (!rsiChartRef.current || !rsiContainerRef.current) return
+
+    const handleResize = () => {
+      if (rsiContainerRef.current && rsiChartRef.current) {
+        rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth })
+      }
+    }
+    window.addEventListener('resize', handleResize)
+    // 전체화면 전환 후 리사이즈
+    const timer = setTimeout(handleResize, 200)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      clearTimeout(timer)
+    }
+  }, [isFullscreen])
+
+  // 전체화면 해제 시 RSI 차트 정리
+  useEffect(() => {
+    if (!isFullscreen && rsiChartRef.current) {
+      rsiChartRef.current.remove()
+      rsiChartRef.current = null
+      rsiSeriesRef.current = null
+    }
+  }, [isFullscreen])
 
   // 캔버스 크기 초기화
   useEffect(() => {
@@ -1037,6 +1178,14 @@ const TradingChart = ({
           </div>
         )}
       </div>
+
+      {/* RSI 서브차트 (전체화면일 때만) */}
+      {isFullscreen && indicators.rsi && (
+        <div className="rsi-subchart">
+          <div className="sub-chart-title">RSI (14)</div>
+          <div ref={rsiContainerRef} style={{ width: '100%', height: 120 }} />
+        </div>
+      )}
 
       {/* 사용 안내 */}
       <div className="chart-help">

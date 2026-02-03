@@ -1559,6 +1559,12 @@ tr.oversold-row .rsi-badge {
   letter-spacing: 0.5px;
 }
 
+.rsi-subchart {
+  position: relative;
+  margin-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* 재무 정보 */
 .financials-section {
   margin-top: 2rem;
