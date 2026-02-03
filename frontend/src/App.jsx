@@ -1681,9 +1681,9 @@ function App() {
                               <div className="news-title">{item.title}</div>
                               <div className="news-meta">
                                 <span className="news-publisher">{item.publisher}</span>
-                                {item.providerPublishTime > 0 && (
+                                {item.pubDate && (
                                   <span className="news-time">
-                                    {new Date(item.providerPublishTime * 1000).toLocaleDateString('ko-KR')}
+                                    {new Date(item.pubDate).toLocaleDateString('ko-KR')}
                                   </span>
                                 )}
                               </div>

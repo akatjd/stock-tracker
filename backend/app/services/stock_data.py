@@ -206,12 +206,39 @@ class StockDataService:
 
             result = []
             for item in news[:limit]:
+                content = item.get('content', item)
+                title = content.get('title', '')
+                if not title:
+                    continue
+
+                # 링크
+                link = ''
+                canonical = content.get('canonicalUrl') or content.get('clickThroughUrl')
+                if canonical:
+                    link = canonical.get('url', '')
+                elif content.get('link'):
+                    link = content.get('link', '')
+
+                # 매체명
+                provider = content.get('provider', {})
+                publisher = provider.get('displayName', '') if isinstance(provider, dict) else content.get('publisher', '')
+
+                # 날짜
+                pub_date = content.get('pubDate', '')
+
+                # 썸네일
+                thumbnail = ''
+                thumb_data = content.get('thumbnail')
+                if thumb_data and thumb_data.get('resolutions'):
+                    resolutions = thumb_data['resolutions']
+                    thumbnail = resolutions[-1].get('url', '') if len(resolutions) > 1 else resolutions[0].get('url', '')
+
                 result.append({
-                    'title': item.get('title', ''),
-                    'publisher': item.get('publisher', ''),
-                    'link': item.get('link', ''),
-                    'providerPublishTime': item.get('providerPublishTime', 0),
-                    'thumbnail': item.get('thumbnail', {}).get('resolutions', [{}])[0].get('url', '') if item.get('thumbnail') else '',
+                    'title': title,
+                    'publisher': publisher,
+                    'link': link,
+                    'pubDate': pub_date,
+                    'thumbnail': thumbnail,
                 })
             return result
         except Exception as e:
