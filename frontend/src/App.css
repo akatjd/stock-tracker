@@ -1706,6 +1706,92 @@ tr.oversold-row .rsi-badge {
   border-radius: 8px;
 }
 
+/* 환율 정보 */
+.price-krw {
+  font-size: 0.55em;
+  color: #a0a0a0;
+  margin-left: 0.5rem;
+  font-weight: 400;
+}
+
+.exchange-rate-info {
+  font-size: 0.75rem;
+  color: #667eea;
+  margin-top: 0.25rem;
+}
+
+/* 뉴스 섹션 */
+.news-section {
+  margin-top: 1.5rem;
+}
+
+.news-section h4 {
+  color: #fff;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.news-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.2s;
+  align-items: center;
+}
+
+.news-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.news-thumbnail {
+  width: 80px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.news-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.news-title {
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin-bottom: 0.35rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.news-item:hover .news-title {
+  color: #fff;
+}
+
+.news-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.news-publisher {
+  color: #667eea;
+}
+
 @media (max-width: 768px) {
   .controls {
     flex-direction: column;

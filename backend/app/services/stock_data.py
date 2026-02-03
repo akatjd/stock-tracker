@@ -173,6 +173,50 @@ class StockDataService:
         self._nyse_cache: Optional[List[str]] = None
         self._cache_time: Optional[datetime] = None
         self._cache_duration = timedelta(hours=24)
+        self._exchange_rate_cache: Optional[float] = None
+        self._exchange_rate_time: Optional[datetime] = None
+
+    def get_usd_krw_rate(self) -> Optional[float]:
+        """USD/KRW 환율 조회 (1시간 캐싱)"""
+        if self._exchange_rate_cache and self._exchange_rate_time:
+            if datetime.now() - self._exchange_rate_time < timedelta(hours=1):
+                return self._exchange_rate_cache
+
+        try:
+            ticker = yf.Ticker("USDKRW=X")
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                rate = round(float(hist['Close'].iloc[-1]), 2)
+                self._exchange_rate_cache = rate
+                self._exchange_rate_time = datetime.now()
+                logger.info(f"USD/KRW exchange rate: {rate}")
+                return rate
+        except Exception as e:
+            logger.error(f"Failed to get USD/KRW rate: {e}")
+
+        return self._exchange_rate_cache or 1350.0  # 실패 시 기본값
+
+    def get_stock_news(self, symbol: str, limit: int = 10) -> List[Dict]:
+        """종목 관련 뉴스 조회"""
+        try:
+            ticker = yf.Ticker(symbol)
+            news = ticker.news
+            if not news:
+                return []
+
+            result = []
+            for item in news[:limit]:
+                result.append({
+                    'title': item.get('title', ''),
+                    'publisher': item.get('publisher', ''),
+                    'link': item.get('link', ''),
+                    'providerPublishTime': item.get('providerPublishTime', 0),
+                    'thumbnail': item.get('thumbnail', {}).get('resolutions', [{}])[0].get('url', '') if item.get('thumbnail') else '',
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get news for {symbol}: {e}")
+            return []
 
     def get_us_symbols(self) -> List[str]:
         """미국 전체 주식 심볼 가져오기 (NYSE + NASDAQ)"""
@@ -936,6 +980,10 @@ class StockDataService:
             # 시가총액 정보
             market_cap = stock_info.get('market_cap') if stock_info else None
 
+            # 뉴스 (한국 주식은 yfinance 티커 형식으로 변환)
+            kr_yf_symbol = f"{symbol}.KS" if market == 'KOSPI' else f"{symbol}.KQ"
+            news = self.get_stock_news(kr_yf_symbol)
+
             return {
                 "symbol": symbol,
                 "name": name,
@@ -957,7 +1005,8 @@ class StockDataService:
                 },
                 "support_resistance": support_resistance,
                 "chart_data": chart_data,
-                "financials": self._get_kr_financials(symbol)
+                "financials": self._get_kr_financials(symbol),
+                "news": news
             }
 
         except Exception as e:
@@ -1230,6 +1279,12 @@ class StockDataService:
             ma60 = round(hist['Close'].tail(60).mean(), 2) if len(hist) >= 60 else None
             ma120 = round(hist['Close'].tail(120).mean(), 2) if len(hist) >= 120 else None
 
+            # 환율 정보
+            exchange_rate = self.get_usd_krw_rate()
+
+            # 뉴스
+            news = self.get_stock_news(symbol)
+
             return {
                 "symbol": symbol,
                 "name": info.get('shortName') or info.get('longName') or symbol,
@@ -1243,6 +1298,8 @@ class StockDataService:
                 "low_52w": low_52w,
                 "rsi": rsi,
                 "market_cap": info.get('marketCap'),
+                "exchange_rate": exchange_rate,
+                "current_price_krw": round(current_price * exchange_rate) if exchange_rate else None,
                 "moving_averages": {
                     "ma5": ma5,
                     "ma20": ma20,
@@ -1251,7 +1308,8 @@ class StockDataService:
                 },
                 "support_resistance": support_resistance,
                 "chart_data": chart_data,
-                "financials": self._get_us_financials(ticker, info)
+                "financials": self._get_us_financials(ticker, info),
+                "news": news
             }
 
         except Exception as e:

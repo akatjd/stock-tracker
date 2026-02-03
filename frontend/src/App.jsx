@@ -1044,6 +1044,12 @@ function App() {
                         ? `₩${stockDetail.current_price?.toLocaleString()}`
                         : `$${stockDetail.current_price?.toFixed(2)}`
                       }
+                      {/* 미국 주식: 원화 환산 */}
+                      {!['KOSPI', 'KOSDAQ'].includes(stockDetail.market) && stockDetail.current_price_krw && (
+                        <span className="price-krw">
+                          ≈ ₩{stockDetail.current_price_krw?.toLocaleString()}
+                        </span>
+                      )}
                     </div>
                     <div className={`price-change-large ${stockDetail.change >= 0 ? 'positive' : 'negative'}`}>
                       {stockDetail.change >= 0 ? '+' : ''}
@@ -1053,6 +1059,12 @@ function App() {
                       }
                       {' '}({stockDetail.change_percent >= 0 ? '+' : ''}{stockDetail.change_percent?.toFixed(2)}%)
                     </div>
+                    {/* 환율 정보 */}
+                    {!['KOSPI', 'KOSDAQ'].includes(stockDetail.market) && stockDetail.exchange_rate && (
+                      <div className="exchange-rate-info">
+                        USD/KRW: ₩{stockDetail.exchange_rate?.toLocaleString()}
+                      </div>
+                    )}
                   </div>
 
                   {/* 주요 지표 */}
@@ -1646,6 +1658,39 @@ function App() {
                   {stockDetail.financials && !stockDetail.financials.available && (
                     <div className="financials-unavailable">
                       <p>{stockDetail.financials.message}</p>
+                    </div>
+                  )}
+
+                  {/* 뉴스 섹션 */}
+                  {stockDetail.news && stockDetail.news.length > 0 && (
+                    <div className="news-section">
+                      <h4>관련 뉴스</h4>
+                      <div className="news-list">
+                        {stockDetail.news.map((item, index) => (
+                          <a
+                            key={index}
+                            href={item.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="news-item"
+                          >
+                            {item.thumbnail && (
+                              <img src={item.thumbnail} alt="" className="news-thumbnail" />
+                            )}
+                            <div className="news-content">
+                              <div className="news-title">{item.title}</div>
+                              <div className="news-meta">
+                                <span className="news-publisher">{item.publisher}</span>
+                                {item.providerPublishTime > 0 && (
+                                  <span className="news-time">
+                                    {new Date(item.providerPublishTime * 1000).toLocaleDateString('ko-KR')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
