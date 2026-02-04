@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Area, AreaChart, ComposedChart, Bar, ReferenceLine, Legend, Cell
@@ -83,6 +83,14 @@ function App() {
     initial_capital: 10000000
   })
   const [showBacktest, setShowBacktest] = useState(false)
+
+  // 실시간 자동갱신 상태
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval, setRefreshInterval] = useState(30) // 초 단위
+  const [lastRefreshTime, setLastRefreshTime] = useState(null)
+  const [priceFlash, setPriceFlash] = useState(null) // 'up' | 'down' | null
+  const autoRefreshRef = useRef(null)
+  const prevPriceRef = useRef(null)
 
   // 자동완성 상태
   const [suggestions, setSuggestions] = useState([])
@@ -302,6 +310,74 @@ function App() {
       setIsBacktesting(false)
     }
   }
+
+  // 실시간 시세 조회 (경량)
+  const fetchQuote = useCallback(async () => {
+    if (!selectedStock) return
+
+    try {
+      const response = await fetch(
+        `http://localhost:8001/api/v1/stock/${encodeURIComponent(selectedStock.symbol)}/quote?market=${encodeURIComponent(selectedStock.market)}`
+      )
+      const data = await response.json()
+
+      if (data.error) return
+
+      setStockDetail(prev => {
+        if (!prev || prev.error) return prev
+
+        // 가격 변동 감지 → 깜빡임 효과
+        const oldPrice = prev.current_price
+        const newPrice = data.current_price
+
+        if (oldPrice !== newPrice) {
+          setPriceFlash(newPrice > oldPrice ? 'up' : 'down')
+          setTimeout(() => setPriceFlash(null), 1000)
+        }
+
+        prevPriceRef.current = oldPrice
+
+        return {
+          ...prev,
+          current_price: data.current_price,
+          change: data.change,
+          change_percent: data.change_percent,
+          volume: data.volume,
+          current_price_krw: data.current_price_krw || prev.current_price_krw,
+          exchange_rate: data.exchange_rate || prev.exchange_rate
+        }
+      })
+
+      setLastRefreshTime(new Date())
+    } catch (err) {
+      console.error('Quote fetch failed:', err)
+    }
+  }, [selectedStock])
+
+  // 자동갱신 타이머 관리
+  useEffect(() => {
+    if (autoRefresh && showDetail && selectedStock) {
+      // 시작 시 즉시 한번 조회
+      fetchQuote()
+      autoRefreshRef.current = setInterval(fetchQuote, refreshInterval * 1000)
+    }
+
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current)
+        autoRefreshRef.current = null
+      }
+    }
+  }, [autoRefresh, showDetail, selectedStock, refreshInterval, fetchQuote])
+
+  // 모달 닫을 때 자동갱신 정리
+  useEffect(() => {
+    if (!showDetail) {
+      setAutoRefresh(false)
+      setPriceFlash(null)
+      prevPriceRef.current = null
+    }
+  }, [showDetail])
 
   // 자동완성 검색
   const fetchSuggestions = async (query) => {
@@ -1062,7 +1138,36 @@ function App() {
                     </>
                   )}
                 </div>
-                <button className="close-button" onClick={closeDetail}>×</button>
+                <div className="detail-header-actions">
+                    {/* 실시간 자동갱신 토글 */}
+                    <div className="auto-refresh-control">
+                      <button
+                        className={`auto-refresh-btn ${autoRefresh ? 'active' : ''}`}
+                        onClick={() => setAutoRefresh(!autoRefresh)}
+                        title={autoRefresh ? '자동갱신 중지' : '실시간 자동갱신'}
+                      >
+                        <span className={`refresh-icon ${autoRefresh ? 'spinning' : ''}`}>&#x21bb;</span>
+                        {autoRefresh ? 'ON' : 'OFF'}
+                      </button>
+                      {autoRefresh && (
+                        <select
+                          className="refresh-interval-select"
+                          value={refreshInterval}
+                          onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                        >
+                          <option value={10}>10초</option>
+                          <option value={30}>30초</option>
+                          <option value={60}>1분</option>
+                        </select>
+                      )}
+                      {lastRefreshTime && autoRefresh && (
+                        <span className="last-refresh-time">
+                          {lastRefreshTime.toLocaleTimeString('ko-KR')}
+                        </span>
+                      )}
+                    </div>
+                    <button className="close-button" onClick={closeDetail}>×</button>
+                  </div>
               </div>
 
               {/* 초기 로딩 (데이터가 없을 때만 전체 스피너 표시) */}
@@ -1080,7 +1185,7 @@ function App() {
                 <div className="detail-body">
                   {/* 가격 정보 */}
                   <div className="price-section">
-                    <div className="current-price-large">
+                    <div className={`current-price-large ${priceFlash ? `price-flash-${priceFlash}` : ''}`}>
                       {['KOSPI', 'KOSDAQ'].includes(stockDetail.market)
                         ? `₩${stockDetail.current_price?.toLocaleString()}`
                         : `$${stockDetail.current_price?.toFixed(2)}`

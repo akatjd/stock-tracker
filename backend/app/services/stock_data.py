@@ -1884,6 +1884,68 @@ class StockDataService:
             logger.error(f"Backtest error for {symbol}: {e}")
             return {"error": f"백테스트 실행 중 오류가 발생했습니다: {str(e)}"}
 
+    def get_stock_quote(self, symbol: str, market: str) -> Dict:
+        """
+        실시간 시세 경량 조회 (가격, 등락, 거래량만)
+
+        Args:
+            symbol: 종목 코드/심볼
+            market: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)
+
+        Returns:
+            현재가, 변동, 변동률, 거래량
+        """
+        try:
+            symbol = symbol.strip().upper()
+            is_korean = market in ['KOSPI', 'KOSDAQ']
+
+            if is_korean:
+                ticker_symbol = f"{symbol}.KS" if market == 'KOSPI' else f"{symbol}.KQ"
+            else:
+                ticker_symbol = symbol
+
+            ticker = yf.Ticker(ticker_symbol)
+            info = ticker.fast_info
+
+            current_price = float(info.get('lastPrice', 0) or info.get('last_price', 0))
+            previous_close = float(info.get('previousClose', 0) or info.get('previous_close', 0))
+
+            if current_price == 0:
+                # fast_info 실패 시 히스토리에서 가져오기
+                hist = ticker.history(period='2d')
+                if len(hist) >= 1:
+                    current_price = float(hist['Close'].iloc[-1])
+                    if len(hist) >= 2:
+                        previous_close = float(hist['Close'].iloc[-2])
+
+            change = current_price - previous_close if previous_close else 0
+            change_percent = (change / previous_close * 100) if previous_close else 0
+
+            volume = int(info.get('lastVolume', 0) or info.get('last_volume', 0))
+
+            result = {
+                "symbol": symbol,
+                "market": market,
+                "current_price": current_price,
+                "change": change,
+                "change_percent": round(change_percent, 2),
+                "volume": volume,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            # 미국 주식: 원화 환산
+            if not is_korean:
+                rate = self.get_usd_krw_rate()
+                if rate:
+                    result["current_price_krw"] = round(current_price * rate)
+                    result["exchange_rate"] = rate
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get quote for {symbol}: {e}")
+            return {"error": str(e)}
+
 
 # 싱글톤 인스턴스
 stock_service = StockDataService()

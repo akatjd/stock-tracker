@@ -488,6 +488,27 @@ async def search_stocks(
     }
 
 
+@app.get("/api/v1/stock/{symbol}/quote")
+async def get_stock_quote(
+    symbol: str,
+    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)")
+):
+    """
+    실시간 시세 경량 조회 (자동갱신용)
+
+    전체 상세 정보 대신 현재가, 등락, 거래량만 빠르게 반환합니다.
+    """
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(
+            executor,
+            lambda: stock_service.get_stock_quote(symbol, market)
+        )
+
+    return result
+
+
 @app.get("/api/v1/stock/{symbol}/backtest")
 async def run_backtest(
     symbol: str,
