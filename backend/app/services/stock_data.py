@@ -1,6 +1,8 @@
 import yfinance as yf
 import FinanceDataReader as fdr
 import pandas as pd
+import numpy as np
+import math
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
@@ -1629,6 +1631,258 @@ class StockDataService:
         except Exception as e:
             logger.error(f"Failed to search stocks: {e}")
             return []
+
+    def run_backtest(self, symbol: str, market: str, strategy: str = "rsi",
+                     buy_rsi: float = 30, sell_rsi: float = 70,
+                     period: str = "2y", initial_capital: float = 10000000,
+                     buy_ma: int = 0, sell_ma: int = 0) -> Dict:
+        """
+        백테스트 시뮬레이터
+
+        Args:
+            symbol: 종목 코드/심볼
+            market: 시장 (KOSPI, KOSDAQ, NASDAQ, NYSE 등)
+            strategy: 전략 타입 (rsi, ma_cross, rsi_ma)
+            buy_rsi: RSI 매수 기준 (이하일 때 매수)
+            sell_rsi: RSI 매도 기준 (이상일 때 매도)
+            period: 백테스트 기간 (1y, 2y, 3y, 5y)
+            initial_capital: 초기 투자금
+            buy_ma: 이동평균 매수 기준 (단기선)
+            sell_ma: 이동평균 매도 기준 (장기선)
+
+        Returns:
+            백테스트 결과 딕셔너리
+        """
+        try:
+            is_korean = market in ['KOSPI', 'KOSDAQ']
+
+            # 데이터 가져오기
+            if is_korean:
+                yf_symbol = f"{symbol}.KS" if market == 'KOSPI' else f"{symbol}.KQ"
+            else:
+                yf_symbol = symbol
+
+            ticker = yf.Ticker(yf_symbol)
+            df = ticker.history(period=period)
+
+            if df.empty or len(df) < 30:
+                return {"error": "데이터가 부족합니다. 다른 기간을 선택해주세요."}
+
+            # 미국 주식: 원화 -> 달러 변환
+            exchange_rate = None
+            if not is_korean:
+                exchange_rate = self.get_usd_krw_rate()
+                capital_usd = initial_capital / exchange_rate
+                initial_capital_display = initial_capital  # 원화 표시용
+                initial_capital = capital_usd  # 실제 거래는 달러로
+
+            # 기술적 지표 계산
+            df['RSI'] = calculate_rsi_series(df['Close'], period=14)
+            df['MA5'] = df['Close'].rolling(window=5).mean()
+            df['MA20'] = df['Close'].rolling(window=20).mean()
+            df['MA60'] = df['Close'].rolling(window=60).mean()
+
+            # NaN 제거
+            df = df.dropna(subset=['RSI', 'Close'])
+
+            if len(df) < 10:
+                return {"error": "유효한 데이터가 부족합니다. 다른 기간을 선택해주세요."}
+
+            # numpy -> python 변환 헬퍼
+            def safe_float(val):
+                if val is None:
+                    return 0.0
+                v = float(val)
+                if math.isnan(v) or math.isinf(v):
+                    return 0.0
+                return v
+
+            # 시뮬레이션
+            capital = initial_capital
+            position = 0  # 보유 수량
+            buy_price = 0
+            trades = []
+            portfolio_values = []
+            in_position = False
+
+            for i, (date, row) in enumerate(df.iterrows()):
+                current_price = safe_float(row['Close'])
+                current_rsi = safe_float(row['RSI'])
+                if current_price <= 0:
+                    continue
+                portfolio_value = capital + (position * current_price)
+
+                # 포트폴리오 가치 기록 (차트용)
+                date_str = date.strftime('%Y-%m-%d')
+                portfolio_values.append({
+                    'date': date_str,
+                    'value': round(safe_float(portfolio_value), 2),
+                    'price': round(safe_float(current_price), 2),
+                    'rsi': round(current_rsi, 2)
+                })
+
+                # 매수 신호
+                buy_signal = False
+                sell_signal = False
+
+                if strategy == 'rsi':
+                    buy_signal = current_rsi <= buy_rsi and not in_position
+                    sell_signal = current_rsi >= sell_rsi and in_position
+                elif strategy == 'ma_cross':
+                    if i > 0:
+                        prev_ma5 = safe_float(df['MA5'].iloc[i - 1])
+                        prev_ma20 = safe_float(df['MA20'].iloc[i - 1])
+                        curr_ma5 = safe_float(row['MA5'])
+                        curr_ma20 = safe_float(row['MA20'])
+                        if prev_ma5 > 0 and prev_ma20 > 0 and curr_ma5 > 0 and curr_ma20 > 0:
+                            # 골든크로스 매수
+                            buy_signal = prev_ma5 <= prev_ma20 and curr_ma5 > curr_ma20 and not in_position
+                            # 데드크로스 매도
+                            sell_signal = prev_ma5 >= prev_ma20 and curr_ma5 < curr_ma20 and in_position
+                elif strategy == 'rsi_ma':
+                    curr_ma5 = safe_float(row['MA5'])
+                    curr_ma20 = safe_float(row['MA20'])
+                    if curr_ma5 > 0 and curr_ma20 > 0:
+                        buy_signal = current_rsi <= buy_rsi and curr_ma5 > curr_ma20 and not in_position
+                        sell_signal = (current_rsi >= sell_rsi or (curr_ma5 < curr_ma20)) and in_position
+
+                # 매수 실행
+                if buy_signal and capital > 0:
+                    shares = int(capital / current_price)
+                    if shares > 0:
+                        cost = shares * current_price
+                        capital -= cost
+                        position = shares
+                        buy_price = current_price
+                        in_position = True
+                        trades.append({
+                            'type': 'BUY',
+                            'date': date_str,
+                            'price': round(current_price, 2),
+                            'shares': shares,
+                            'amount': round(cost, 2),
+                            'rsi': round(current_rsi, 2),
+                            'profit': None,
+                            'profit_percent': None
+                        })
+
+                # 매도 실행
+                elif sell_signal and position > 0:
+                    revenue = position * current_price
+                    profit = revenue - (position * buy_price)
+                    profit_percent = ((current_price - buy_price) / buy_price) * 100
+                    capital += revenue
+                    trades.append({
+                        'type': 'SELL',
+                        'date': date_str,
+                        'price': round(current_price, 2),
+                        'shares': position,
+                        'amount': round(revenue, 2),
+                        'rsi': round(current_rsi, 2),
+                        'profit': round(profit, 2),
+                        'profit_percent': round(profit_percent, 2)
+                    })
+                    position = 0
+                    buy_price = 0
+                    in_position = False
+
+            # 최종 포트폴리오 가치
+            final_price = safe_float(df['Close'].iloc[-1])
+            final_value = capital + (position * final_price)
+            total_return = final_value - initial_capital
+            total_return_percent = (total_return / initial_capital) * 100 if initial_capital > 0 else 0
+
+            # Buy & Hold 수익률 비교
+            first_price = safe_float(df['Close'].iloc[0])
+            buy_hold_return = ((final_price - first_price) / first_price) * 100 if first_price > 0 else 0
+
+            # 거래 통계
+            sell_trades = [t for t in trades if t['type'] == 'SELL']
+            winning_trades = [t for t in sell_trades if t['profit'] and t['profit'] > 0]
+            losing_trades = [t for t in sell_trades if t['profit'] and t['profit'] <= 0]
+
+            win_rate = (len(winning_trades) / len(sell_trades) * 100) if sell_trades else 0
+            avg_profit = safe_float(sum(t['profit'] for t in sell_trades) / len(sell_trades)) if sell_trades else 0
+            avg_win = safe_float(sum(t['profit'] for t in winning_trades) / len(winning_trades)) if winning_trades else 0
+            avg_loss = safe_float(sum(t['profit'] for t in losing_trades) / len(losing_trades)) if losing_trades else 0
+
+            # 최대 낙폭 (MDD) 계산
+            peak = initial_capital
+            max_drawdown = 0
+            for pv in portfolio_values:
+                if pv['value'] > peak:
+                    peak = pv['value']
+                drawdown = ((peak - pv['value']) / peak) * 100
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+
+            # 미국 주식: 달러 -> 원화 변환 (표시용)
+            currency = 'KRW'
+            display_initial = initial_capital
+            display_final = final_value
+            display_return = total_return
+            display_holding_value = (position * final_price) if position > 0 else 0
+
+            if not is_korean and exchange_rate:
+                currency = 'USD'
+                display_initial = round(initial_capital_display)  # 원래 원화 입력값
+                display_final = round(final_value * exchange_rate)
+                display_return = round(total_return * exchange_rate)
+                display_holding_value = round(display_holding_value * exchange_rate)
+                # 거래 금액도 원화로 변환
+                for t in trades:
+                    t['amount_krw'] = round(t['amount'] * exchange_rate)
+                    if t['profit'] is not None:
+                        t['profit_krw'] = round(t['profit'] * exchange_rate)
+                # 포트폴리오 가치도 원화로 변환
+                for pv in portfolio_values:
+                    pv['value_krw'] = round(pv['value'] * exchange_rate)
+
+            # 포트폴리오 가치 데이터 간소화 (차트용, 최대 200포인트)
+            step = max(1, len(portfolio_values) // 200)
+            chart_data = portfolio_values[::step]
+            if portfolio_values[-1] not in chart_data:
+                chart_data.append(portfolio_values[-1])
+
+            return {
+                "symbol": symbol,
+                "market": market,
+                "strategy": strategy,
+                "period": period,
+                "currency": currency,
+                "exchange_rate": exchange_rate,
+                "is_korean": is_korean,
+                "initial_capital": round(display_initial),
+                "final_value": round(display_final),
+                "total_return": round(display_return),
+                "total_return_percent": round(total_return_percent, 2),
+                "buy_hold_return_percent": round(buy_hold_return, 2),
+                "total_trades": len(trades),
+                "sell_trades": len(sell_trades),
+                "winning_trades": len(winning_trades),
+                "losing_trades": len(losing_trades),
+                "win_rate": round(win_rate, 2),
+                "avg_profit": round(avg_profit, 2),
+                "avg_win": round(avg_win, 2),
+                "avg_loss": round(avg_loss, 2),
+                "max_drawdown": round(max_drawdown, 2),
+                "still_holding": position > 0,
+                "holding_shares": position,
+                "holding_value": round(display_holding_value),
+                "trades": trades,
+                "chart_data": chart_data,
+                "data_start": df.index[0].strftime('%Y-%m-%d'),
+                "data_end": df.index[-1].strftime('%Y-%m-%d'),
+                "parameters": {
+                    "buy_rsi": buy_rsi,
+                    "sell_rsi": sell_rsi,
+                    "strategy": strategy
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Backtest error for {symbol}: {e}")
+            return {"error": f"백테스트 실행 중 오류가 발생했습니다: {str(e)}"}
 
 
 # 싱글톤 인스턴스

@@ -71,6 +71,7 @@ const TradingChart = ({
   interval = '1d',
   onPeriodChange = null,
   onIntervalChange = null,
+  onIndicatorToggle = null,
   isLoading = false
 }) => {
   const chartContainerRef = useRef(null)
@@ -240,11 +241,23 @@ const TradingChart = ({
     }
   }, [isFullscreen, fullscreenHeight, height])
 
+  // 데이터 변경 추적 (fitContent는 data가 바뀔 때만)
+  const prevDataRef = useRef(null)
+
   // 데이터 업데이트 (차트 재생성 없이 시리즈만 업데이트)
   useEffect(() => {
     if (!chartRef.current || !data || data.length === 0) return
 
     const chart = chartRef.current
+
+    // 현재 뷰 범위 저장 (지표 토글 시 복원용)
+    let savedRange = null
+    try {
+      savedRange = chart.timeScale().getVisibleLogicalRange()
+    } catch (e) {}
+
+    const isDataChanged = prevDataRef.current !== data
+    prevDataRef.current = data
 
     // 기존 시리즈 모두 제거
     try {
@@ -407,8 +420,18 @@ const TradingChart = ({
       })
     }
 
-    // 차트 크기 조정
-    chart.timeScale().fitContent()
+    // 차트 뷰 범위 처리
+    if (isDataChanged || !savedRange) {
+      // 데이터가 바뀌었으면 전체 맞춤
+      chart.timeScale().fitContent()
+    } else {
+      // 지표만 토글된 경우 기존 뷰 범위 복원
+      try {
+        chart.timeScale().setVisibleLogicalRange(savedRange)
+      } catch (e) {
+        chart.timeScale().fitContent()
+      }
+    }
 
   }, [data, indicators, supportResistance, volumeRatio])
 
@@ -1112,6 +1135,57 @@ const TradingChart = ({
               ))}
             </div>
             {isLoading && <span className="loading-hint">로딩...</span>}
+          </>
+        )}
+
+        {/* 지표 토글 (전체화면에서만 표시) */}
+        {isFullscreen && onIndicatorToggle && (
+          <>
+            <span className="toolbar-divider"></span>
+            <div className="toolbar-group indicator-toggles-fs">
+              <button
+                className={`draw-btn small ${indicators.ma5 ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('ma5', !indicators.ma5)}
+                style={indicators.ma5 ? {borderColor: '#ff6b6b', color: '#ff6b6b'} : {}}
+              >
+                MA5
+              </button>
+              <button
+                className={`draw-btn small ${indicators.ma20 ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('ma20', !indicators.ma20)}
+                style={indicators.ma20 ? {borderColor: '#ffd93d', color: '#ffd93d'} : {}}
+              >
+                MA20
+              </button>
+              <button
+                className={`draw-btn small ${indicators.ma60 ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('ma60', !indicators.ma60)}
+                style={indicators.ma60 ? {borderColor: '#6bcb77', color: '#6bcb77'} : {}}
+              >
+                MA60
+              </button>
+              <button
+                className={`draw-btn small ${indicators.ma120 ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('ma120', !indicators.ma120)}
+                style={indicators.ma120 ? {borderColor: '#9d4edd', color: '#9d4edd'} : {}}
+              >
+                MA120
+              </button>
+              <button
+                className={`draw-btn small ${indicators.bollinger ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('bollinger', !indicators.bollinger)}
+                style={indicators.bollinger ? {borderColor: '#4ecdc4', color: '#4ecdc4'} : {}}
+              >
+                볼린저
+              </button>
+              <button
+                className={`draw-btn small ${indicators.supportResistance ? 'active' : ''}`}
+                onClick={() => onIndicatorToggle('supportResistance', !indicators.supportResistance)}
+                style={indicators.supportResistance ? {borderColor: '#f472b6', color: '#f472b6'} : {}}
+              >
+                지지/저항
+              </button>
+            </div>
           </>
         )}
 

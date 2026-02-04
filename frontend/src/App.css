@@ -1726,6 +1726,282 @@ tr.oversold-row .rsi-badge {
   margin-top: 0.25rem;
 }
 
+/* 백테스트 시뮬레이터 */
+.backtest-section {
+  margin-top: 1.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.backtest-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  background: rgba(102, 126, 234, 0.1);
+  transition: background 0.2s;
+}
+
+.backtest-header:hover {
+  background: rgba(102, 126, 234, 0.15);
+}
+
+.backtest-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #667eea;
+}
+
+.backtest-toggle {
+  color: #667eea;
+  font-size: 0.75rem;
+}
+
+.backtest-body {
+  padding: 1.25rem;
+}
+
+.backtest-config {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.config-row label {
+  font-size: 0.75rem;
+  color: #a0a0a0;
+  font-weight: 500;
+}
+
+.config-row select,
+.config-row input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.config-row select:focus,
+.config-row input:focus {
+  border-color: #667eea;
+}
+
+.config-row select option {
+  background: #1a1a2e;
+}
+
+.backtest-run-btn {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.backtest-run-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.backtest-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.backtest-loading {
+  text-align: center;
+  padding: 2rem;
+  color: #a0a0a0;
+}
+
+.backtest-loading .spinner {
+  margin: 0 auto 0.75rem;
+}
+
+.backtest-results {
+  margin-top: 1rem;
+}
+
+.backtest-summary {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.backtest-period-info {
+  font-size: 0.8rem;
+  color: #a0a0a0;
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.backtest-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.backtest-stat {
+  text-align: center;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+}
+
+.backtest-stat.highlight {
+  background: rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+}
+
+.stat-label {
+  display: block;
+  font-size: 0.7rem;
+  color: #a0a0a0;
+  margin-bottom: 0.25rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.stat-value.big {
+  font-size: 1.2rem;
+}
+
+.stat-value.positive {
+  color: #22c55e;
+}
+
+.stat-value.negative {
+  color: #ef4444;
+}
+
+.backtest-holding-notice {
+  margin-top: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #f59e0b;
+  text-align: center;
+}
+
+.backtest-chart {
+  margin-top: 1rem;
+}
+
+.backtest-chart h5 {
+  font-size: 0.85rem;
+  color: #a0a0a0;
+  margin-bottom: 0.5rem;
+}
+
+.backtest-trades {
+  margin-top: 1rem;
+}
+
+.backtest-trades h5 {
+  font-size: 0.85rem;
+  color: #a0a0a0;
+  margin-bottom: 0.5rem;
+}
+
+.trades-table-wrapper {
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.trades-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.trades-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(26, 26, 46, 0.98);
+  padding: 0.5rem 0.4rem;
+  text-align: center;
+  color: #a0a0a0;
+  font-weight: 500;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.trades-table td {
+  padding: 0.4rem;
+  text-align: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #d0d0d0;
+}
+
+.trade-buy {
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.trade-sell {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.trade-badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.trade-badge.buy {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.trade-badge.sell {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.trades-table td.positive {
+  color: #22c55e;
+}
+
+.trades-table td.negative {
+  color: #ef4444;
+}
+
+.backtest-error {
+  text-align: center;
+  padding: 1rem;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 8px;
+  margin-top: 0.75rem;
+}
+
 /* 뉴스 섹션 */
 .news-section {
   margin-top: 1.5rem;

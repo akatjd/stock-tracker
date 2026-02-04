@@ -488,6 +488,49 @@ async def search_stocks(
     }
 
 
+@app.get("/api/v1/stock/{symbol}/backtest")
+async def run_backtest(
+    symbol: str,
+    market: str = Query(..., description="시장 (KOSPI, KOSDAQ, NASDAQ, NYSE)"),
+    strategy: str = Query("rsi", description="전략 (rsi, ma_cross, rsi_ma)"),
+    buy_rsi: float = Query(30, description="RSI 매수 기준"),
+    sell_rsi: float = Query(70, description="RSI 매도 기준"),
+    period: str = Query("2y", description="백테스트 기간 (1y, 2y, 3y, 5y)"),
+    initial_capital: float = Query(10000000, description="초기 투자금")
+):
+    """
+    백테스트 시뮬레이터
+
+    - **symbol**: 종목코드/심볼
+    - **market**: 시장
+    - **strategy**: 전략 타입
+        - rsi: RSI 기반 매매 (RSI ≤ buy_rsi 매수, RSI ≥ sell_rsi 매도)
+        - ma_cross: 이동평균 교차 (MA5/MA20 골든크로스 매수, 데드크로스 매도)
+        - rsi_ma: RSI + 이동평균 복합 전략
+    - **buy_rsi**: RSI 매수 기준값
+    - **sell_rsi**: RSI 매도 기준값
+    - **period**: 백테스트 기간
+    - **initial_capital**: 초기 투자금
+    """
+    loop = asyncio.get_event_loop()
+
+    with ThreadPoolExecutor() as executor:
+        result = await loop.run_in_executor(
+            executor,
+            lambda: stock_service.run_backtest(
+                symbol=symbol,
+                market=market,
+                strategy=strategy,
+                buy_rsi=buy_rsi,
+                sell_rsi=sell_rsi,
+                period=period,
+                initial_capital=initial_capital
+            )
+        )
+
+    return result
+
+
 @app.get("/api/v1/stock/{symbol}/rsi")
 async def get_stock_rsi(
     symbol: str,

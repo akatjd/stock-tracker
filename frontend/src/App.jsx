@@ -72,6 +72,18 @@ function App() {
   const [isSearching, setIsSearching] = useState(false)
   const [searchError, setSearchError] = useState(null)
 
+  // 백테스트 상태
+  const [backtestResult, setBacktestResult] = useState(null)
+  const [isBacktesting, setIsBacktesting] = useState(false)
+  const [backtestParams, setBacktestParams] = useState({
+    strategy: 'rsi',
+    buy_rsi: 30,
+    sell_rsi: 70,
+    period: '2y',
+    initial_capital: 10000000
+  })
+  const [showBacktest, setShowBacktest] = useState(false)
+
   // 자동완성 상태
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -257,9 +269,38 @@ function App() {
     setShowDetail(false)
     setSelectedStock(null)
     setStockDetail(null)
+    setBacktestResult(null)
+    setShowBacktest(false)
     // 초기값으로 리셋
     setChartPeriod('6mo')
     setChartInterval('1d')
+  }
+
+  // 백테스트 실행
+  const runBacktest = async () => {
+    if (!selectedStock) return
+    setIsBacktesting(true)
+    setBacktestResult(null)
+
+    try {
+      const params = new URLSearchParams({
+        market: selectedStock.market,
+        strategy: backtestParams.strategy,
+        buy_rsi: backtestParams.buy_rsi,
+        sell_rsi: backtestParams.sell_rsi,
+        period: backtestParams.period,
+        initial_capital: backtestParams.initial_capital
+      })
+      const response = await fetch(
+        `http://localhost:8001/api/v1/stock/${encodeURIComponent(selectedStock.symbol)}/backtest?${params}`
+      )
+      const data = await response.json()
+      setBacktestResult(data)
+    } catch (err) {
+      setBacktestResult({ error: '백테스트 실행 중 오류가 발생했습니다.' })
+    } finally {
+      setIsBacktesting(false)
+    }
   }
 
   // 자동완성 검색
@@ -1262,6 +1303,7 @@ function App() {
                         interval={chartInterval}
                         onPeriodChange={(p) => refreshChartData(p, chartInterval)}
                         onIntervalChange={(i) => refreshChartData(chartPeriod, i)}
+                        onIndicatorToggle={(key, value) => setChartIndicators(prev => ({...prev, [key]: value}))}
                         isLoading={isLoadingDetail}
                       />
                       {/* 데이터 새로고침 중 오버레이 */}
@@ -1660,6 +1702,287 @@ function App() {
                       <p>{stockDetail.financials.message}</p>
                     </div>
                   )}
+
+                  {/* 백테스트 시뮬레이터 */}
+                  <div className="backtest-section">
+                    <div className="backtest-header" onClick={() => setShowBacktest(!showBacktest)}>
+                      <h4>백테스트 시뮬레이터</h4>
+                      <span className="backtest-toggle">{showBacktest ? '▲' : '▼'}</span>
+                    </div>
+
+                    {showBacktest && (
+                      <div className="backtest-body">
+                        {/* 전략 설정 */}
+                        <div className="backtest-config">
+                          <div className="config-row">
+                            <label>전략</label>
+                            <select
+                              value={backtestParams.strategy}
+                              onChange={(e) => setBacktestParams({...backtestParams, strategy: e.target.value})}
+                            >
+                              <option value="rsi">RSI 매매</option>
+                              <option value="ma_cross">이동평균 교차 (MA5/MA20)</option>
+                              <option value="rsi_ma">RSI + 이동평균 복합</option>
+                            </select>
+                          </div>
+
+                          {(backtestParams.strategy === 'rsi' || backtestParams.strategy === 'rsi_ma') && (
+                            <>
+                              <div className="config-row">
+                                <label>매수 RSI (이하)</label>
+                                <input
+                                  type="number"
+                                  min="5"
+                                  max="50"
+                                  value={backtestParams.buy_rsi}
+                                  onChange={(e) => setBacktestParams({...backtestParams, buy_rsi: Number(e.target.value)})}
+                                />
+                              </div>
+                              <div className="config-row">
+                                <label>매도 RSI (이상)</label>
+                                <input
+                                  type="number"
+                                  min="50"
+                                  max="95"
+                                  value={backtestParams.sell_rsi}
+                                  onChange={(e) => setBacktestParams({...backtestParams, sell_rsi: Number(e.target.value)})}
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          <div className="config-row">
+                            <label>테스트 기간</label>
+                            <select
+                              value={backtestParams.period}
+                              onChange={(e) => setBacktestParams({...backtestParams, period: e.target.value})}
+                            >
+                              <option value="1y">1년</option>
+                              <option value="2y">2년</option>
+                              <option value="3y">3년</option>
+                              <option value="5y">5년</option>
+                            </select>
+                          </div>
+
+                          <div className="config-row">
+                            <label>초기 투자금</label>
+                            <select
+                              value={backtestParams.initial_capital}
+                              onChange={(e) => setBacktestParams({...backtestParams, initial_capital: Number(e.target.value)})}
+                            >
+                              <option value={1000000}>100만원</option>
+                              <option value={5000000}>500만원</option>
+                              <option value={10000000}>1,000만원</option>
+                              <option value={50000000}>5,000만원</option>
+                              <option value={100000000}>1억원</option>
+                            </select>
+                          </div>
+
+                          <button
+                            className="backtest-run-btn"
+                            onClick={runBacktest}
+                            disabled={isBacktesting}
+                          >
+                            {isBacktesting ? '시뮬레이션 중...' : '백테스트 실행'}
+                          </button>
+                        </div>
+
+                        {/* 백테스트 결과 */}
+                        {isBacktesting && (
+                          <div className="backtest-loading">
+                            <div className="spinner"></div>
+                            <p>백테스트 실행 중...</p>
+                          </div>
+                        )}
+
+                        {backtestResult && !backtestResult.error && (
+                          <div className="backtest-results">
+                            <div className="backtest-summary">
+                              <div className="backtest-period-info">
+                                {backtestResult.data_start} ~ {backtestResult.data_end}
+                              </div>
+
+                              <div className="backtest-stats-grid">
+                                <div className="backtest-stat">
+                                  <span className="stat-label">초기 투자금</span>
+                                  <span className="stat-value">
+                                    {backtestResult.initial_capital?.toLocaleString()}원
+                                    {backtestResult.exchange_rate && (
+                                      <small style={{display:'block',fontSize:'0.65rem',color:'#888'}}>
+                                        (≈${Math.round(backtestResult.initial_capital / backtestResult.exchange_rate).toLocaleString()})
+                                      </small>
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">최종 자산</span>
+                                  <span className={`stat-value ${backtestResult.total_return >= 0 ? 'positive' : 'negative'}`}>
+                                    {backtestResult.final_value?.toLocaleString()}원
+                                  </span>
+                                </div>
+                                <div className="backtest-stat highlight">
+                                  <span className="stat-label">전략 수익률</span>
+                                  <span className={`stat-value big ${backtestResult.total_return_percent >= 0 ? 'positive' : 'negative'}`}>
+                                    {backtestResult.total_return_percent >= 0 ? '+' : ''}{backtestResult.total_return_percent?.toFixed(2)}%
+                                  </span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">Buy & Hold 수익률</span>
+                                  <span className={`stat-value ${backtestResult.buy_hold_return_percent >= 0 ? 'positive' : 'negative'}`}>
+                                    {backtestResult.buy_hold_return_percent >= 0 ? '+' : ''}{backtestResult.buy_hold_return_percent?.toFixed(2)}%
+                                  </span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">총 거래 횟수</span>
+                                  <span className="stat-value">{backtestResult.total_trades}회</span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">승률</span>
+                                  <span className={`stat-value ${backtestResult.win_rate >= 50 ? 'positive' : 'negative'}`}>
+                                    {backtestResult.win_rate?.toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">승/패</span>
+                                  <span className="stat-value">
+                                    <span className="positive">{backtestResult.winning_trades}승</span>
+                                    {' / '}
+                                    <span className="negative">{backtestResult.losing_trades}패</span>
+                                  </span>
+                                </div>
+                                <div className="backtest-stat">
+                                  <span className="stat-label">최대 낙폭 (MDD)</span>
+                                  <span className="stat-value negative">
+                                    -{backtestResult.max_drawdown?.toFixed(2)}%
+                                  </span>
+                                </div>
+                              </div>
+
+                              {backtestResult.still_holding && (
+                                <div className="backtest-holding-notice">
+                                  현재 {backtestResult.holding_shares}주 보유 중 (평가금액: {backtestResult.holding_value?.toLocaleString()}원
+                                  {backtestResult.exchange_rate && ` / 환율: ₩${backtestResult.exchange_rate?.toLocaleString()}`})
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 포트폴리오 가치 차트 */}
+                            {backtestResult.chart_data && backtestResult.chart_data.length > 0 && (
+                              <div className="backtest-chart">
+                                <h5>포트폴리오 가치 변화</h5>
+                                <ResponsiveContainer width="100%" height={200}>
+                                  <AreaChart data={backtestResult.chart_data}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                    <XAxis
+                                      dataKey="date"
+                                      tick={{ fill: '#a0a0a0', fontSize: 9 }}
+                                      tickFormatter={(v) => v.slice(2, 7)}
+                                      interval={Math.floor(backtestResult.chart_data.length / 6)}
+                                    />
+                                    <YAxis
+                                      tick={{ fill: '#a0a0a0', fontSize: 9 }}
+                                      tickFormatter={(v) => `${(v / 10000).toFixed(0)}만`}
+                                      width={50}
+                                    />
+                                    <Tooltip
+                                      contentStyle={{
+                                        background: 'rgba(26, 26, 46, 0.95)',
+                                        border: '1px solid rgba(255,255,255,0.2)',
+                                        borderRadius: '8px',
+                                        color: '#fff',
+                                        fontSize: '11px'
+                                      }}
+                                      formatter={(value, name) => {
+                                        if (name === 'value_krw' || name === 'value') {
+                                          return [`${value?.toLocaleString()}원`, '포트폴리오']
+                                        }
+                                        return [value, name]
+                                      }}
+                                      labelFormatter={(label) => `날짜: ${label}`}
+                                    />
+                                    <Area
+                                      type="monotone"
+                                      dataKey={backtestResult.exchange_rate ? 'value_krw' : 'value'}
+                                      stroke="#667eea"
+                                      strokeWidth={2}
+                                      fill="#667eea"
+                                      fillOpacity={0.2}
+                                    />
+                                    <ReferenceLine
+                                      y={backtestResult.initial_capital}
+                                      stroke="#f59e0b"
+                                      strokeDasharray="3 3"
+                                      label={{ value: '초기자본', fill: '#f59e0b', fontSize: 10 }}
+                                    />
+                                  </AreaChart>
+                                </ResponsiveContainer>
+                              </div>
+                            )}
+
+                            {/* 거래 내역 */}
+                            {backtestResult.trades && backtestResult.trades.length > 0 && (
+                              <div className="backtest-trades">
+                                <h5>거래 내역 ({backtestResult.trades.length}건)</h5>
+                                <div className="trades-table-wrapper">
+                                  <table className="trades-table">
+                                    <thead>
+                                      <tr>
+                                        <th>유형</th>
+                                        <th>날짜</th>
+                                        <th>가격</th>
+                                        <th>수량</th>
+                                        <th>금액</th>
+                                        <th>RSI</th>
+                                        <th>손익</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {backtestResult.trades.map((trade, idx) => (
+                                        <tr key={idx} className={trade.type === 'BUY' ? 'trade-buy' : 'trade-sell'}>
+                                          <td>
+                                            <span className={`trade-badge ${trade.type.toLowerCase()}`}>
+                                              {trade.type === 'BUY' ? '매수' : '매도'}
+                                            </span>
+                                          </td>
+                                          <td>{trade.date}</td>
+                                          <td>
+                                            {backtestResult.is_korean
+                                              ? `₩${trade.price?.toLocaleString()}`
+                                              : `$${trade.price?.toFixed(2)}`
+                                            }
+                                          </td>
+                                          <td>{trade.shares}</td>
+                                          <td>
+                                            {trade.amount_krw
+                                              ? `₩${trade.amount_krw?.toLocaleString()}`
+                                              : `₩${trade.amount?.toLocaleString()}`
+                                            }
+                                          </td>
+                                          <td>{trade.rsi?.toFixed(1)}</td>
+                                          <td className={trade.profit > 0 ? 'positive' : trade.profit < 0 ? 'negative' : ''}>
+                                            {trade.profit !== null
+                                              ? `${trade.profit_percent >= 0 ? '+' : ''}${trade.profit_percent}%`
+                                              : '-'
+                                            }
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {backtestResult?.error && (
+                          <div className="backtest-error">
+                            <p>{backtestResult.error}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   {/* 뉴스 섹션 */}
                   {stockDetail.news && stockDetail.news.length > 0 && (
