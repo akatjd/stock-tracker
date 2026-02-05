@@ -2129,13 +2129,18 @@ tr.oversold-row .rsi-badge {
 }
 
 .refresh-interval-select {
-  padding: 0.3rem 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: #e0e0e0;
-  font-size: 0.7rem;
+  background: #1a1a2e;
+  color: #fff;
+  font-size: 0.75rem;
   cursor: pointer;
+}
+
+.refresh-interval-select option {
+  background: #1a1a2e;
+  color: #fff;
 }
 
 .refresh-interval-select:focus {

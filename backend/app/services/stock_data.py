@@ -1905,10 +1905,19 @@ class StockDataService:
                 ticker_symbol = symbol
 
             ticker = yf.Ticker(ticker_symbol)
-            info = ticker.fast_info
 
-            current_price = float(info.get('lastPrice', 0) or info.get('last_price', 0))
-            previous_close = float(info.get('previousClose', 0) or info.get('previous_close', 0))
+            current_price = 0
+            previous_close = 0
+            volume = 0
+
+            # fast_info는 딕셔너리가 아닌 객체 → 속성 접근
+            try:
+                fi = ticker.fast_info
+                current_price = float(getattr(fi, 'last_price', 0) or 0)
+                previous_close = float(getattr(fi, 'previous_close', 0) or 0)
+                volume = int(getattr(fi, 'last_volume', 0) or 0)
+            except Exception:
+                pass
 
             if current_price == 0:
                 # fast_info 실패 시 히스토리에서 가져오기
@@ -1917,11 +1926,11 @@ class StockDataService:
                     current_price = float(hist['Close'].iloc[-1])
                     if len(hist) >= 2:
                         previous_close = float(hist['Close'].iloc[-2])
+                    if volume == 0 and 'Volume' in hist.columns:
+                        volume = int(hist['Volume'].iloc[-1])
 
             change = current_price - previous_close if previous_close else 0
             change_percent = (change / previous_close * 100) if previous_close else 0
-
-            volume = int(info.get('lastVolume', 0) or info.get('last_volume', 0))
 
             result = {
                 "symbol": symbol,

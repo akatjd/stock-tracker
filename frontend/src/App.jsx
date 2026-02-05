@@ -319,9 +319,14 @@ function App() {
       const response = await fetch(
         `http://localhost:8001/api/v1/stock/${encodeURIComponent(selectedStock.symbol)}/quote?market=${encodeURIComponent(selectedStock.market)}`
       )
+
+      // API 응답 실패 시 무시
+      if (!response.ok) return
+
       const data = await response.json()
 
-      if (data.error) return
+      // 에러 응답이거나 current_price가 없으면 무시
+      if (data.error || data.detail || data.current_price === undefined) return
 
       setStockDetail(prev => {
         if (!prev || prev.error) return prev
@@ -330,19 +335,20 @@ function App() {
         const oldPrice = prev.current_price
         const newPrice = data.current_price
 
-        if (oldPrice !== newPrice) {
+        if (oldPrice !== newPrice && newPrice !== 0) {
           setPriceFlash(newPrice > oldPrice ? 'up' : 'down')
           setTimeout(() => setPriceFlash(null), 1000)
         }
 
         prevPriceRef.current = oldPrice
 
+        // 유효한 값만 업데이트 (0이나 undefined면 기존값 유지)
         return {
           ...prev,
-          current_price: data.current_price,
-          change: data.change,
-          change_percent: data.change_percent,
-          volume: data.volume,
+          current_price: newPrice || prev.current_price,
+          change: data.change ?? prev.change,
+          change_percent: data.change_percent ?? prev.change_percent,
+          volume: data.volume || prev.volume,
           current_price_krw: data.current_price_krw || prev.current_price_krw,
           exchange_rate: data.exchange_rate || prev.exchange_rate
         }
