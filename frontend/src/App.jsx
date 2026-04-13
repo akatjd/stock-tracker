@@ -99,6 +99,77 @@ function App() {
   const searchTimeoutRef = useRef(null)
   const searchInputRef = useRef(null)
 
+  // 탭 상태
+  const [activeTab, setActiveTab] = useState('scanner')
+
+  // 채팅 상태
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'assistant', content: '안녕하세요! 주식 분석 AI입니다.\n종목 RSI 조회, 과매도 스캔, 종목 검색을 도와드립니다.\n\n예시: "삼성전자 RSI 알려줘", "나스닥 과매도 종목 찾아줘"' }
+  ])
+  const [chatInput, setChatInput] = useState('')
+  const [isChatLoading, setIsChatLoading] = useState(false)
+  const chatBottomRef = useRef(null)
+
+  // 채팅 전송
+  const sendChat = async () => {
+    const msg = chatInput.trim()
+    if (!msg || isChatLoading) return
+
+    setChatInput('')
+    setChatMessages(prev => [...prev, { role: 'user', content: msg }])
+    setIsChatLoading(true)
+
+    // 스트리밍 응답용 빈 assistant 메시지 미리 추가
+    setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
+
+    try {
+      const url = `http://localhost:8002/chat/stream?message=${encodeURIComponent(msg)}`
+      const es = new EventSource(url)
+
+      es.onmessage = (e) => {
+        const data = JSON.parse(e.data)
+        if (data.type === 'token') {
+          setChatMessages(prev => {
+            const updated = [...prev]
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: updated[updated.length - 1].content + data.content
+            }
+            return updated
+          })
+        } else if (data.type === 'done') {
+          es.close()
+          setIsChatLoading(false)
+        }
+      }
+
+      es.onerror = () => {
+        es.close()
+        setIsChatLoading(false)
+        setChatMessages(prev => {
+          const updated = [...prev]
+          if (updated[updated.length - 1].content === '') {
+            updated[updated.length - 1] = { role: 'assistant', content: '오류가 발생했습니다. 에이전트 서버(8002)가 실행 중인지 확인해주세요.' }
+          }
+          return updated
+        })
+      }
+    } catch (err) {
+      setIsChatLoading(false)
+    }
+  }
+
+  // 채팅 초기화
+  const resetChat = async () => {
+    await fetch('http://localhost:8002/chat/history', { method: 'DELETE' })
+    setChatMessages([{ role: 'assistant', content: '대화가 초기화되었습니다. 무엇을 도와드릴까요?' }])
+  }
+
+  // 채팅 스크롤
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
+
   // 미리보기 함수
   const fetchPreview = async (page = 1, search = '') => {
     setIsLoadingPreview(true)
@@ -839,7 +910,62 @@ function App() {
         </div>
       </header>
 
+      <div className="tab-bar">
+        <button
+          className={`tab-btn ${activeTab === 'scanner' ? 'active' : ''}`}
+          onClick={() => setActiveTab('scanner')}
+        >
+          RSI 스캐너
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'chat' ? 'active' : ''}`}
+          onClick={() => setActiveTab('chat')}
+        >
+          AI 어시스턴트
+        </button>
+      </div>
+
       <main className="main">
+        {activeTab === 'chat' && (
+          <div className="chat-container">
+            <div className="chat-messages">
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`chat-message ${msg.role}`}>
+                  <div className="chat-bubble">
+                    {msg.content.split('\n').map((line, j) => (
+                      <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
+                    ))}
+                    {isChatLoading && i === chatMessages.length - 1 && msg.role === 'assistant' && (
+                      <span className="chat-cursor">▍</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={chatBottomRef} />
+            </div>
+            <div className="chat-input-area">
+              <button className="chat-reset-btn" onClick={resetChat} title="대화 초기화">↺</button>
+              <input
+                className="chat-input"
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendChat()}
+                placeholder="질문을 입력하세요 (예: 삼성전자 RSI 알려줘)"
+                disabled={isChatLoading}
+              />
+              <button
+                className="chat-send-btn"
+                onClick={sendChat}
+                disabled={isChatLoading || !chatInput.trim()}
+              >
+                {isChatLoading ? '...' : '전송'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="scanner-content" style={{display: activeTab === 'scanner' ? 'block' : 'none'}}>
         <div className="controls">
           <div className="control-group">
             <label>시장 선택</label>
@@ -2301,6 +2427,7 @@ function App() {
             <p>스캔된 종목이 없습니다</p>
           </div>
         )}
+        </div>
       </main>
 
       <footer className="footer">

@@ -5,8 +5,15 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
 ENV/
 .env
+
+# Claude Code
+.claude/
+
+# npm
+package-lock.json
 
 # Node
 node_modules/
