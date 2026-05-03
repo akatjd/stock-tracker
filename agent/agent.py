@@ -12,7 +12,6 @@ Stock Analysis Agent — LangGraph + Ollama (qwen2.5:7b)
   - conditional_edges로 END vs 루프백 분기
 """
 
-import json
 import requests
 from typing import Annotated
 
@@ -121,6 +120,158 @@ def search_stock(query: str) -> str:
         return f"검색 실패: {e}"
 
 
+@tool
+def run_backtest(
+    symbol: str,
+    market: str,
+    strategy: str = "rsi",
+    buy_rsi: float = 30,
+    sell_rsi: float = 70,
+    period: str = "2y",
+) -> str:
+    """
+    종목의 매매 전략을 과거 데이터로 백테스트합니다.
+    symbol: 종목코드 또는 심볼 (예: 005930, AAPL)
+    market: 시장 (KOSPI, KOSDAQ, NASDAQ, DOW)
+    strategy: 전략 (rsi, ma_cross, rsi_ma)
+      - rsi: RSI 기반 (buy_rsi 이하 매수, sell_rsi 이상 매도)
+      - ma_cross: 이동평균 골든/데드크로스
+      - rsi_ma: RSI + 이동평균 복합
+    buy_rsi: RSI 매수 기준 (기본 30)
+    sell_rsi: RSI 매도 기준 (기본 70)
+    period: 백테스트 기간 (1y, 2y, 3y, 5y)
+    """
+    try:
+        r = requests.get(
+            f"{BASE_URL}/stock/{symbol}/backtest",
+            params={
+                "market": market,
+                "strategy": strategy,
+                "buy_rsi": buy_rsi,
+                "sell_rsi": sell_rsi,
+                "period": period,
+                "initial_capital": 10000000,
+            },
+            timeout=30,
+        )
+        d = r.json()
+        if "error" in d:
+            return f"백테스트 실패: {d['error']}"
+
+        currency = "₩" if d.get("is_korean") else "$"
+        ret = d.get("total_return_percent", 0)
+        bh = d.get("buy_hold_return_percent", 0)
+
+        return (
+            f"{d.get('symbol')} {strategy.upper()} 전략 백테스트 ({d.get('data_start')} ~ {d.get('data_end')})\n"
+            f"  전략 수익률:      {ret:+.1f}%\n"
+            f"  Buy & Hold:      {bh:+.1f}%\n"
+            f"  전략 우위:        {'✅ 전략 승' if ret > bh else '❌ Buy&Hold 승'}\n"
+            f"  총 거래 횟수:     {d.get('total_trades')}회\n"
+            f"  승률:             {d.get('win_rate'):.1f}%\n"
+            f"  최대 낙폭(MDD):   {d.get('max_drawdown'):.1f}%\n"
+            f"  최종 자산:        {currency}{d.get('final_value', 0):,.0f}"
+        )
+    except Exception as e:
+        return f"백테스트 실패: {e}"
+
+
+@tool
+def get_news(symbol: str, market: str, limit: int = 5) -> str:
+    """
+    종목의 최신 뉴스를 가져옵니다.
+    symbol: 종목코드 또는 심볼 (예: 005930, AAPL)
+    market: 시장 (KOSPI, KOSDAQ, NASDAQ, DOW)
+    limit: 뉴스 개수 (기본 5)
+    """
+    try:
+        r = requests.get(
+            f"{BASE_URL}/stock/detail/{symbol}",
+            params={"market": market, "period": "1mo", "interval": "1d"},
+            timeout=15,
+        )
+        d = r.json()
+        if "error" in d:
+            return f"오류: {d['error']}"
+
+        news = d.get("news", [])
+        if not news:
+            return f"{symbol} 관련 뉴스가 없습니다."
+
+        lines = [f"{d.get('name', symbol)} 최신 뉴스 ({len(news[:limit])}건):"]
+        for n in news[:limit]:
+            pub = n.get("pubDate", "")[:10] if n.get("pubDate") else ""
+            lines.append(f"  [{pub}] {n.get('title', '')}")
+            lines.append(f"         출처: {n.get('publisher', '')}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"뉴스 조회 실패: {e}"
+
+
+@tool
+def get_financials(symbol: str, market: str) -> str:
+    """
+    종목의 재무지표를 조회합니다. (PER, PBR, 배당수익률, 매출/영업이익 등)
+    symbol: 종목코드 또는 심볼 (예: 005930, AAPL)
+    market: 시장 (KOSPI, KOSDAQ, NASDAQ, DOW)
+    """
+    try:
+        r = requests.get(
+            f"{BASE_URL}/stock/detail/{symbol}",
+            params={"market": market, "period": "1mo", "interval": "1d"},
+            timeout=15,
+        )
+        d = r.json()
+        if "error" in d:
+            return f"오류: {d['error']}"
+
+        f = d.get("financials", {})
+        if not f.get("available"):
+            return f"{symbol} 재무 데이터를 가져오지 못했습니다."
+
+        basic = f.get("basic", {})
+        profit = f.get("profitability", {})
+        income = f.get("incomeStatementYearly", [{}])[0]  # 최근 연도
+
+        per = basic.get("trailingPE") or basic.get("forwardPE")
+        per_label = "Forward PER" if not basic.get("trailingPE") else "PER"
+
+        lines = [f"{d.get('name', symbol)} ({symbol}) 재무지표"]
+
+        # 밸류에이션
+        lines.append("  [밸류에이션]")
+        if per:
+            lines.append(f"    {per_label}: {per:.1f}배")
+        if basic.get("priceToBook"):
+            lines.append(f"    PBR: {basic['priceToBook']:.2f}배")
+        if basic.get("dividendYield"):
+            lines.append(f"    배당수익률: {basic['dividendYield']:.2f}%")
+        lines.append(f"    시가총액: {basic.get('marketCapFormatted', 'N/A')}")
+
+        # 수익성
+        lines.append("  [수익성]")
+        if profit.get("grossMargin"):
+            lines.append(f"    매출총이익률: {profit['grossMargin']:.1f}%")
+        if profit.get("operatingMargin"):
+            lines.append(f"    영업이익률: {profit['operatingMargin']:.1f}%")
+        if profit.get("returnOnEquity"):
+            lines.append(f"    ROE: {profit['returnOnEquity']:.1f}%")
+
+        # 최근 연도 실적
+        if income.get("year"):
+            lines.append(f"  [{income['year']}년 실적]")
+            if income.get("totalRevenueFormatted"):
+                lines.append(f"    매출: {income['totalRevenueFormatted']}")
+            if income.get("operatingIncomeFormatted"):
+                lines.append(f"    영업이익: {income['operatingIncomeFormatted']}")
+            if income.get("netIncomeFormatted"):
+                lines.append(f"    순이익: {income['netIncomeFormatted']}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"재무 조회 실패: {e}"
+
+
 # ── 그래프 상태 ────────────────────────────────────────────────────────────────
 
 class State(TypedDict):
@@ -131,7 +282,7 @@ class State(TypedDict):
 
 # ── LLM 설정 ──────────────────────────────────────────────────────────────────
 
-tools = [get_stock_rsi, scan_oversold, search_stock]
+tools = [get_stock_rsi, scan_oversold, search_stock, run_backtest, get_news, get_financials]
 
 llm = ChatOllama(model="qwen2.5:7b", temperature=0)
 llm_with_tools = llm.bind_tools(tools)
@@ -142,19 +293,37 @@ critic_llm = ChatOllama(model="qwen2.5:7b", temperature=0)
 
 # ── 노드 정의 ─────────────────────────────────────────────────────────────────
 
+def has_chinese(text: str) -> bool:
+    """중국어 문자 비율이 5% 이상이면 True"""
+    if not text:
+        return False
+    chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+    return chinese_chars / len(text) > 0.05
+
+
 def llm_node(state: State):
     """LLM이 도구 호출 또는 최종 답변을 결정하는 노드"""
-    # 재시도 시 힌트 메시지 추가
     messages = state["messages"]
+
     if state.get("needs_retry") and state.get("iteration", 0) > 0:
         hint = SystemMessage(content=(
-            "이전 답변이 불완전했습니다. "
-            "사용자 질문에 필요한 정보가 누락됐거나 도구를 충분히 활용하지 않았습니다. "
-            "도구를 다시 호출하거나 더 구체적인 답변을 작성하세요."
+            "Previous answer was incomplete. "
+            "Call tools again or provide a more specific answer. "
+            "Respond in Korean only."
         ))
         messages = messages + [hint]
 
     response = llm_with_tools.invoke(messages)
+
+    # 중국어 감지 시 한국어로 재생성 (최대 2회)
+    if response.content and has_chinese(response.content) and not response.tool_calls:
+        force_korean = SystemMessage(content=(
+            "Your previous response contained Chinese characters. "
+            "You MUST rewrite it entirely in Korean (한국어). "
+            "Do not use any Chinese characters."
+        ))
+        response = llm_with_tools.invoke(messages + [response, force_korean])
+
     return {
         "messages": [response],
         "iteration": state.get("iteration", 0) + 1,
@@ -254,8 +423,15 @@ agent = graph_builder.compile()
 
 # ── 실행 ──────────────────────────────────────────────────────────────────────
 
+SYSTEM_PROMPT = SystemMessage(content=(
+    "You are a Korean stock analysis assistant. "
+    "CRITICAL: Always respond in Korean (한국어). Never use Chinese or English in your response. "
+    "Use actual data from tools. Include specific numbers in your answers."
+))
+
 def chat(user_input: str, history: list = None) -> tuple[str, list]:
-    messages = (history or []) + [HumanMessage(content=user_input)]
+    base = [SYSTEM_PROMPT] if not history else []
+    messages = base + (history or []) + [HumanMessage(content=user_input)]
     result = agent.invoke({
         "messages": messages,
         "iteration": 0,
