@@ -110,6 +110,43 @@ async def health():
     return {"status": "ok"}
 
 
+# === [CLAUDE-PRO ADDON] =====================================================
+# Claude Pro 요금제 기반 채팅 (claude-agent-sdk).
+# 이 블록 전체를 삭제하고 quant_tools.py / claude_agent.py 두 파일을 지우면
+# 원상 복구됨. 기존 /chat, /chat/stream, /chat/history는 손대지 않음.
+try:
+    from claude_agent import stream_chat as _claude_stream_chat
+    _CLAUDE_AVAILABLE = True
+except Exception as _e:
+    _CLAUDE_AVAILABLE = False
+    _CLAUDE_IMPORT_ERROR = str(_e)
+
+
+@app.get("/chat/claude/stream")
+async def chat_claude_stream(message: str, model: str = "sonnet"):
+    """Claude Pro 백엔드로 SSE 스트리밍. model: sonnet | opus | haiku"""
+    if not _CLAUDE_AVAILABLE:
+        async def err():
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Claude SDK 미사용 가능: {_CLAUDE_IMPORT_ERROR}'})}\n\n"
+        return StreamingResponse(err(), media_type="text/event-stream")
+
+    async def generate():
+        async for evt in _claude_stream_chat(message, model=model):
+            yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/chat/claude/health")
+async def chat_claude_health():
+    return {"available": _CLAUDE_AVAILABLE, "error": None if _CLAUDE_AVAILABLE else _CLAUDE_IMPORT_ERROR}
+# === [/CLAUDE-PRO ADDON] ====================================================
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=8002, reload=True)

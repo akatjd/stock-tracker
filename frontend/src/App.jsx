@@ -110,6 +110,15 @@ function App() {
   const [isChatLoading, setIsChatLoading] = useState(false)
   const chatBottomRef = useRef(null)
 
+  // === [CLAUDE-PRO ADDON] === 모델 토글 (ollama=로컬, claude=Pro) ===
+  const [chatBackend, setChatBackend] = useState('ollama')   // 'ollama' | 'claude'
+  const [claudeModel, setClaudeModel] = useState('sonnet')   // 'sonnet' | 'haiku' | 'opus'
+  const [toolUseLog, setToolUseLog] = useState([])
+  // === [/CLAUDE-PRO ADDON] ===
+
+  // 기업 개요 펼침 상태
+  const [overviewExpanded, setOverviewExpanded] = useState(false)
+
   // 채팅 전송
   const sendChat = async () => {
     const msg = chatInput.trim()
@@ -123,7 +132,13 @@ function App() {
     setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
     try {
-      const url = `http://localhost:8002/chat/stream?message=${encodeURIComponent(msg)}`
+      // === [CLAUDE-PRO ADDON] === 백엔드 분기 ===
+      const url = chatBackend === 'claude'
+        ? `http://localhost:8002/chat/claude/stream?message=${encodeURIComponent(msg)}&model=${claudeModel}`
+        : `http://localhost:8002/chat/stream?message=${encodeURIComponent(msg)}`
+      // 도구 호출 로그 초기화
+      if (chatBackend === 'claude') setToolUseLog([])
+      // === [/CLAUDE-PRO ADDON] ===
       const es = new EventSource(url)
 
       es.onmessage = (e) => {
@@ -137,6 +152,19 @@ function App() {
             }
             return updated
           })
+        } else if (data.type === 'tool_use') {
+          // === [CLAUDE-PRO ADDON] === 도구 호출 표시 ===
+          const niceName = (data.name || '').replace(/^mcp__quant__/, '')
+          setToolUseLog(prev => [...prev, niceName])
+          // === [/CLAUDE-PRO ADDON] ===
+        } else if (data.type === 'error') {
+          setChatMessages(prev => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: `❌ ${data.message}` }
+            return updated
+          })
+          es.close()
+          setIsChatLoading(false)
         } else if (data.type === 'done') {
           es.close()
           setIsChatLoading(false)
@@ -300,6 +328,10 @@ function App() {
     setIsLoadingDetail(true)
     setShowDetail(true)
     setStockDetail(null)
+    setOverviewExpanded(false)
+    // 차트 컨트롤 state도 동기화 (스캐너 봉 타입 → 팝업 봉 타입)
+    setChartPeriod(period)
+    setChartInterval(interval)
 
     try {
       const response = await fetch(
@@ -928,6 +960,53 @@ function App() {
       <main className="main">
         {activeTab === 'chat' && (
           <div className="chat-container">
+            {/* === [CLAUDE-PRO ADDON] === 백엔드/모델 토글 === */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '8px',
+              padding: '8px 12px', borderBottom: '1px solid #2a2e39',
+              background: '#1a1d24', fontSize: '13px'
+            }}>
+              <span style={{ color: '#888' }}>모델:</span>
+              <button
+                onClick={() => setChatBackend('ollama')}
+                style={{
+                  padding: '4px 10px', borderRadius: '4px', cursor: 'pointer',
+                  border: 'none', fontSize: '12px',
+                  background: chatBackend === 'ollama' ? '#2962ff' : '#2a2e39',
+                  color: chatBackend === 'ollama' ? '#fff' : '#aaa'
+                }}
+              >🖥️ Ollama (로컬)</button>
+              <button
+                onClick={() => setChatBackend('claude')}
+                style={{
+                  padding: '4px 10px', borderRadius: '4px', cursor: 'pointer',
+                  border: 'none', fontSize: '12px',
+                  background: chatBackend === 'claude' ? '#d97706' : '#2a2e39',
+                  color: chatBackend === 'claude' ? '#fff' : '#aaa'
+                }}
+              >☁️ Claude (Pro)</button>
+              {chatBackend === 'claude' && (
+                <select
+                  value={claudeModel}
+                  onChange={e => setClaudeModel(e.target.value)}
+                  style={{
+                    padding: '4px 8px', borderRadius: '4px',
+                    background: '#2a2e39', color: '#eee', border: '1px solid #444',
+                    fontSize: '12px', marginLeft: '4px'
+                  }}
+                >
+                  <option value="haiku">Haiku (빠름)</option>
+                  <option value="sonnet">Sonnet (균형)</option>
+                  <option value="opus">Opus (최고 성능)</option>
+                </select>
+              )}
+              {chatBackend === 'claude' && toolUseLog.length > 0 && (
+                <span style={{ marginLeft: 'auto', color: '#888', fontSize: '11px' }}>
+                  🔧 {toolUseLog.slice(-3).join(' → ')}
+                </span>
+              )}
+            </div>
+            {/* === [/CLAUDE-PRO ADDON] === */}
             <div className="chat-messages">
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`chat-message ${msg.role}`}>
@@ -1344,6 +1423,67 @@ function App() {
                       </div>
                     )}
                   </div>
+
+                  {/* 기업 개요 */}
+                  {stockDetail.financials?.available && (stockDetail.financials.description || stockDetail.financials.sector) && (
+                    <div style={{
+                      margin: '12px 0',
+                      padding: '12px 14px',
+                      background: '#1a1d24',
+                      border: '1px solid #2a2e39',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      lineHeight: '1.6',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: stockDetail.financials.description ? '8px' : '0' }}>
+                        <strong style={{ color: '#eee' }}>📋 기업 개요</strong>
+                        {stockDetail.financials.sector && (
+                          <span style={{
+                            padding: '2px 8px', borderRadius: '10px',
+                            background: '#2962ff33', color: '#5b8def',
+                            fontSize: '11px',
+                          }}>{stockDetail.financials.sector}</span>
+                        )}
+                        {stockDetail.financials.industry && (
+                          <span style={{
+                            padding: '2px 8px', borderRadius: '10px',
+                            background: '#2a2e39', color: '#aaa',
+                            fontSize: '11px',
+                          }}>{stockDetail.financials.industry}</span>
+                        )}
+                        {stockDetail.financials.website && (
+                          <a
+                            href={stockDetail.financials.website}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ marginLeft: 'auto', fontSize: '11px', color: '#5b8def' }}
+                          >🔗 홈페이지</a>
+                        )}
+                      </div>
+                      {stockDetail.financials.description ? (
+                        <>
+                          <p style={{ margin: 0, color: '#ccc', whiteSpace: 'pre-wrap' }}>
+                            {overviewExpanded || stockDetail.financials.description.length <= 200
+                              ? stockDetail.financials.description
+                              : stockDetail.financials.description.slice(0, 200) + '…'}
+                          </p>
+                          {stockDetail.financials.description.length > 200 && (
+                            <button
+                              onClick={() => setOverviewExpanded(!overviewExpanded)}
+                              style={{
+                                marginTop: '6px', padding: '2px 8px', cursor: 'pointer',
+                                background: 'transparent', color: '#5b8def',
+                                border: '1px solid #2a4880', borderRadius: '4px',
+                                fontSize: '11px',
+                              }}
+                            >{overviewExpanded ? '접기 ▲' : '더 보기 ▼'}</button>
+                          )}
+                        </>
+                      ) : (
+                        <p style={{ margin: 0, color: '#888', fontSize: '12px' }}>기업 설명 데이터가 없습니다.</p>
+                      )}
+                    </div>
+                  )}
 
                   {/* 주요 지표 */}
                   <div className="indicators-grid">
@@ -1925,12 +2065,6 @@ function App() {
                           <p><strong>산업:</strong> {stockDetail.financials.industry}</p>
                         </div>
                       )}
-                      {stockDetail.financials.description && (
-                        <div className="company-description">
-                          <h5>기업 소개</h5>
-                          <p>{stockDetail.financials.description}</p>
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -2384,7 +2518,11 @@ function App() {
                   <tr
                     key={`${stock.symbol}-${index}`}
                     className={`clickable-row ${stock.is_oversold ? 'oversold-row' : ''}`}
-                    onClick={() => fetchStockDetail(stock)}
+                    onClick={() => {
+                      // 스캐너 봉 타입(day/week/month) → 팝업 interval(1d/1wk/1mo) 매핑
+                      const intervalMap = { day: '1d', week: '1wk', month: '1mo' }
+                      fetchStockDetail(stock, chartPeriod, intervalMap[period] || '1d')
+                    }}
                   >
                     <td>
                       <span className={`market-badge ${stock.market.toLowerCase()}`}>

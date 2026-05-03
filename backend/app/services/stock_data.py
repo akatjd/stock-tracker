@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import math
 import logging
+import requests
+from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -198,8 +200,108 @@ class StockDataService:
 
         return self._exchange_rate_cache or 1350.0  # 실패 시 기본값
 
+    def get_naver_company_overview(self, code: str) -> Dict[str, str]:
+        """네이버 금융 기업개요 크롤링 (한국 소형/중형주 폴백)
+
+        yfinance가 longBusinessSummary를 안 주는 KRX 상장사 대부분을 커버.
+        반환: {"description": "...", "name": "..."}
+        """
+        url = "https://finance.naver.com/item/coinfo.naver"
+        params = {"code": code, "target": "finsum_more"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://finance.naver.com/",
+        }
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+            r.encoding = "euc-kr"
+            soup = BeautifulSoup(r.text, "lxml")
+
+            summary = soup.select_one("#summary_info")
+            if not summary:
+                return {"description": "", "name": ""}
+
+            # 기업개요는 여러 <p> 태그에 분산됨
+            paragraphs = [p.get_text(strip=True) for p in summary.select("p") if p.get_text(strip=True)]
+            description = " ".join(paragraphs)
+
+            # 종목명 (페이지 상단 .wrap_company h2)
+            name = ""
+            name_el = soup.select_one(".wrap_company h2 a")
+            if name_el:
+                name = name_el.get_text(strip=True)
+
+            return {"description": description, "name": name}
+        except Exception as e:
+            logger.error(f"Failed to get Naver company overview for {code}: {e}")
+            return {"description": "", "name": ""}
+
+    def get_naver_news(self, code: str, limit: int = 10) -> List[Dict]:
+        """네이버 금융 종목뉴스 크롤링 (한국 주식 전용)
+
+        code: 6자리 종목코드 (예: 005930)
+        """
+        url = "https://finance.naver.com/item/news_news.naver"
+        params = {
+            "code": code,
+            "page": 1,
+            "sm": "title_entity_id.basic",
+            "clusterId": "",
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/120.0.0.0 Safari/537.36",
+            "Referer": f"https://finance.naver.com/item/news.naver?code={code}",
+        }
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=10)
+            r.encoding = "euc-kr"
+            soup = BeautifulSoup(r.text, "lxml")
+
+            results = []
+            for row in soup.select("table.type5 tbody tr"):
+                title_td = row.select_one("td.title")
+                info_td = row.select_one("td.info")
+                date_td = row.select_one("td.date")
+                if not (title_td and info_td and date_td):
+                    continue
+
+                a = title_td.select_one("a.tit")
+                if not a:
+                    continue
+
+                title = a.get_text(strip=True)
+                href = a.get("href", "")
+                # /item/news_read.naver?article_id=XXX&office_id=YYY...
+                # JS가 https://n.news.naver.com/mnews/article/{office_id}/{article_id} 로 리다이렉트
+                from urllib.parse import urlparse, parse_qs
+                qs = parse_qs(urlparse(href).query)
+                office_id = (qs.get("office_id") or qs.get("officeId") or [""])[0]
+                article_id = (qs.get("article_id") or qs.get("articleId") or [""])[0]
+                link = (
+                    f"https://n.news.naver.com/mnews/article/{office_id}/{article_id}"
+                    if office_id and article_id else f"https://finance.naver.com{href}"
+                )
+
+                results.append({
+                    "title": title,
+                    "publisher": info_td.get_text(strip=True),
+                    "link": link,
+                    "pubDate": date_td.get_text(strip=True),
+                    "thumbnail": "",
+                })
+                if len(results) >= limit:
+                    break
+            return results
+        except Exception as e:
+            logger.error(f"Failed to get Naver news for {code}: {e}")
+            return []
+
     def get_stock_news(self, symbol: str, limit: int = 10) -> List[Dict]:
-        """종목 관련 뉴스 조회"""
+        """종목 관련 뉴스 조회 (Yahoo Finance — 미국 주식용)"""
         try:
             ticker = yf.Ticker(symbol)
             news = ticker.news
@@ -934,6 +1036,11 @@ class StockDataService:
             stocks = self.get_kospi_symbols_detailed() if market == 'KOSPI' else self.get_kosdaq_symbols_detailed()
             stock_info = next((s for s in stocks if s['code'] == symbol), None)
             name = stock_info['name'] if stock_info else symbol
+            # 종목 리스트에서 못 찾으면 (시장 잘못 지정 등) 네이버에서 보완
+            if name == symbol:
+                naver_overview = self.get_naver_company_overview(symbol)
+                if naver_overview.get("name"):
+                    name = naver_overview["name"]
 
             # 기술적 지표 계산
             close_prices = df['Close']
@@ -1009,9 +1116,8 @@ class StockDataService:
             # 시가총액 정보
             market_cap = stock_info.get('market_cap') if stock_info else None
 
-            # 뉴스 (한국 주식은 yfinance 티커 형식으로 변환)
-            kr_yf_symbol = f"{symbol}.KS" if market == 'KOSPI' else f"{symbol}.KQ"
-            news = self.get_stock_news(kr_yf_symbol)
+            # 뉴스 (네이버 금융 크롤링)
+            news = self.get_naver_news(symbol)
 
             return {
                 "symbol": symbol,
@@ -1156,9 +1262,32 @@ class StockDataService:
             else:
                 div_yield_pct = None
 
+            # 기업 개요
+            # 1차: yfinance longBusinessSummary (대형주 위주, 영문)
+            # 2차 폴백: 네이버 금융 기업개요 (소형/중형주 커버, 한국어)
+            description_raw = info.get('longBusinessSummary', '') or ''
+            description_kr = ''
+            if description_raw:
+                hangul = sum(1 for c in description_raw if '가' <= c <= '힣')
+                is_korean = hangul / max(len(description_raw), 1) > 0.3
+                if is_korean:
+                    description_kr = description_raw
+                else:
+                    description_kr = translate_to_korean(description_raw)
+
+            # yfinance 결과가 비었거나 너무 짧으면 네이버로 폴백
+            if not description_kr or len(description_kr) < 30:
+                naver = self.get_naver_company_overview(symbol)
+                if naver.get("description"):
+                    description_kr = naver["description"]
+
             financials_data = {
                 "available": True,
                 "currency": "KRW",
+                "description": description_kr,
+                "sector": info.get('sector', ''),
+                "industry": info.get('industry', ''),
+                "website": info.get('website', ''),
                 # 기본 정보
                 "basic": {
                     "marketCap": info.get('marketCap'),
@@ -1352,8 +1481,7 @@ class StockDataService:
             description_en = info.get('longBusinessSummary', '')
             description_kr = ''
             if description_en:
-                # 500자로 제한 후 번역
-                description_kr = translate_to_korean(description_en[:500])
+                description_kr = translate_to_korean(description_en)
 
             # 손익계산서
             income_stmt = ticker.financials
@@ -1479,6 +1607,7 @@ class StockDataService:
                 # 기존 정보도 유지
                 "sector": info.get('sector'),
                 "industry": info.get('industry'),
+                "website": info.get('website', ''),
                 "description": description_kr
             }
         except Exception as e:
